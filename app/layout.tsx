@@ -3,8 +3,9 @@ import { Geist, Roboto_Slab } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip";
 import Nav from "@/components/nav";
+import { AppProviders } from "@/components/providers/app-providers";
 
 const robotoSlab = Roboto_Slab({ subsets: ['latin'], variable: '--font-serif' });
 
@@ -39,10 +40,12 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <TooltipProvider>
-            <div className="flex h-screen flex-col overflow-hidden">
-              <Nav />
-              {children}
-            </div>
+            <AppProviders>
+              <div className="flex h-screen flex-col overflow-hidden">
+                <Nav />
+                {children}
+              </div>
+            </AppProviders>
           </TooltipProvider>
         </ThemeProvider>
       </body>

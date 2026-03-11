@@ -12,7 +12,7 @@ export default function Nav() {
                 </div>
                 <div className="flex items-center gap-2">
                     <Link href="/protected">Protected</Link>
-                    <Suspense>
+                    <Suspense fallback={null}>
                         <AuthButton />
                     </Suspense>
                     <ThemeSwitcher />
