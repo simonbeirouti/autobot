@@ -6,6 +6,7 @@ Autobot is a simple Next.js app built with:
 - Next.js App Router for the frontend
 - TanStack Query with IndexedDB persistence for client-side caching
 - shadcn/ui for the component layer
+- Deep Agents + LangGraph for autonomous intake and run orchestration
 
 ## Getting started
 
@@ -29,6 +30,19 @@ pnpm dev
 ```
 
 4. Open [http://localhost:3000](http://localhost:3000)
+
+## Autonomous run setup
+
+1. Apply the SQL schema in [supabase/migrations/20260311_autobot_runs.sql](/Users/besi/Developer/ai/autobot/supabase/migrations/20260311_autobot_runs.sql) to your Supabase project.
+   Apply [supabase/migrations/20260310_profiles_and_files.sql](/Users/besi/Developer/ai/autobot/supabase/migrations/20260310_profiles_and_files.sql) first, then [supabase/migrations/20260311_autobot_runs.sql](/Users/besi/Developer/ai/autobot/supabase/migrations/20260311_autobot_runs.sql).
+2. Set these additional environment variables:
+
+```env
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+3. Sign in before creating a run. Run state, telemetry, and clarification history are stored per authenticated user.
 
 ## Notes
 
