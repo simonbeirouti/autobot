@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import Nav from "@/components/nav";
 import { AppProviders } from "@/components/providers/app-providers";
+import { Toaster } from "@/components/ui/sonner";
 
 const defaultUrl = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
@@ -32,9 +32,9 @@ export default function RootLayout({
           <TooltipProvider>
             <AppProviders>
               <div className="flex h-screen flex-col overflow-hidden">
-                <Nav />
                 {children}
               </div>
+              <Toaster />
             </AppProviders>
           </TooltipProvider>
         </ThemeProvider>

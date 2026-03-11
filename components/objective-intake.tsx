@@ -215,34 +215,18 @@ export function ObjectiveIntake() {
 
   return (
     <section className="relative flex min-h-full flex-col items-center justify-center overflow-hidden py-16">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,rgba(255,208,102,0.3),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(33,191,115,0.18),transparent_30%),linear-gradient(180deg,#fffef7_0%,#f7f4ea_58%,#efe8db_100%)]" />
-      <div className="absolute inset-x-0 top-16 -z-10 mx-auto h-80 w-80 rounded-full bg-amber-300/25 blur-3xl" />
 
       <div className="w-full max-w-4xl space-y-8">
-        <div className="space-y-4 text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-foreground/55">
-            Autonomous Intake
-          </p>
-          <h1 className="font-serif text-5xl leading-none tracking-tight text-foreground sm:text-7xl">
-            Point the agents at a business objective.
-          </h1>
-          <p className="mx-auto max-w-2xl text-sm text-foreground/70 sm:text-base">
-            Start with the goal. AutoBot will ask only the missing questions, decide
-            whether one agent is enough, and then open a live workspace once it is
-            ready to act.
-          </p>
-        </div>
-
-        <div className="rounded-[2rem] border border-black/10 bg-white/85 p-4 shadow-[0_30px_80px_rgba(73,58,28,0.14)] backdrop-blur">
+        <div className="border border-black/10 bg-white/85 p-4 shadow-[0_30px_80px_rgba(73,58,28,0.14)] backdrop-blur">
           <div className="flex flex-col gap-3 sm:flex-row">
             <Input
-              className="h-16 rounded-full border-none bg-transparent px-6 text-base shadow-none focus-visible:ring-0 sm:text-lg"
+              className="pl-3 text-base shadow-none focus-visible:ring-0 sm:text-lg"
               onChange={(event) => setObjective(event.target.value)}
               placeholder="Describe the business objective you want the agent system to own..."
               value={objective}
             />
             <Button
-              className="h-16 rounded-full px-8 text-base"
+              className="text-base"
               disabled={!canStart}
               onClick={submitObjective}
             >
@@ -253,7 +237,7 @@ export function ObjectiveIntake() {
           <div className="mt-4 flex flex-wrap gap-2">
             {starterPrompts.map((prompt) => (
               <button
-                className="rounded-full border border-black/10 bg-black/[0.03] px-3 py-1.5 text-left text-xs text-foreground/70 transition hover:bg-black/[0.06]"
+                className="border border-black/10 bg-black/[0.03] px-3 py-1.5 text-left text-xs text-foreground/70 transition hover:bg-black/[0.06]"
                 key={prompt}
                 onClick={() => setObjective(prompt)}
                 type="button"
@@ -264,8 +248,8 @@ export function ObjectiveIntake() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="rounded-[1.75rem] border border-black/10 bg-white/70 p-6 shadow-[0_16px_50px_rgba(73,58,28,0.08)] backdrop-blur">
+        <div className="w-full">
+          <div className="border border-black/10 bg-white/70 p-6 shadow-[0_16px_50px_rgba(73,58,28,0.08)] backdrop-blur">
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.25em] text-foreground/45">
@@ -273,17 +257,17 @@ export function ObjectiveIntake() {
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold">{statusLabel}</h2>
               </div>
-              <div className="rounded-full border border-black/10 px-3 py-1 text-xs text-foreground/60">
+              <div className="border border-black/10 px-3 py-1 text-xs text-foreground/60">
                 {sessionId ? `Session ${sessionId.slice(0, 8)}` : "No session"}
               </div>
             </div>
 
             {summary ? (
-              <div className="rounded-3xl bg-stone-950 px-5 py-4 font-mono text-sm text-stone-100">
+              <div className="bg-stone-950 px-5 py-4 font-mono text-sm text-stone-100">
                 {summary}
               </div>
             ) : (
-              <div className="rounded-3xl border border-dashed border-black/12 px-5 py-8 text-sm text-foreground/55">
+              <div className="border border-dashed border-black/12 px-5 py-8 text-sm text-foreground/55">
                 The first response will decide whether clarification is needed or the
                 agent can move directly into a run.
               </div>
@@ -291,13 +275,13 @@ export function ObjectiveIntake() {
 
             {questions.length > 0 ? (
               <div className="mt-5 space-y-4">
-                <div className="rounded-[1.5rem] border border-black/8 bg-black/[0.02] px-4 py-3 text-sm text-foreground/65">
+                <div className="border border-black/8 bg-black/[0.02] px-4 py-3 text-sm text-foreground/65">
                   Answer each clarification item directly or use a suggested response to move faster.
                 </div>
                 <div className="space-y-3">
                   {questions.map((question, index) => (
                     <div
-                      className="rounded-[1.75rem] border border-black/8 bg-black/[0.03] p-4"
+                      className="border border-black/8 bg-black/[0.03] p-4"
                       key={`${question}-${index}`}
                     >
                       <div className="flex items-center justify-between gap-3">
@@ -312,7 +296,7 @@ export function ObjectiveIntake() {
                       <div className="mt-3 flex flex-wrap gap-2">
                         {getSuggestedAnswers(question).map((suggestion) => (
                           <button
-                            className="rounded-full border border-black/10 bg-white/80 px-3 py-1.5 text-left text-xs text-foreground/75 transition hover:bg-white"
+                            className="border border-black/10 bg-white/80 px-3 py-1.5 text-left text-xs text-foreground/75 transition hover:bg-white"
                             key={suggestion}
                             onClick={() => setAnswerForQuestion(question, suggestion)}
                             type="button"
@@ -322,7 +306,7 @@ export function ObjectiveIntake() {
                         ))}
                       </div>
                       <Textarea
-                        className="mt-3 min-h-24 rounded-[1.5rem] border-black/10 bg-white/80 px-4 py-3 text-sm shadow-none focus-visible:ring-0"
+                        className="mt-3 min-h-24 border-black/10 bg-white/80 px-4 py-3 text-sm shadow-none focus-visible:ring-0"
                         onChange={(event) => setAnswerForQuestion(question, event.target.value)}
                         placeholder="Add your answer or refine one of the suggested options..."
                         value={answers[question] ?? ""}
@@ -330,12 +314,12 @@ export function ObjectiveIntake() {
                     </div>
                   ))}
                 </div>
-                <div className="flex flex-col gap-3 rounded-[1.5rem] border border-black/8 bg-white/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 border border-black/8 bg-white/70 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-foreground/60">
                     AutoBot will combine these answers into the next planning pass.
                   </p>
                   <Button
-                    className="h-12 rounded-full px-6"
+                    className="h-12 px-6"
                     disabled={!canRespond}
                     onClick={submitClarificationAnswer}
                   >
@@ -346,12 +330,12 @@ export function ObjectiveIntake() {
             ) : null}
 
             {readyRunId ? (
-              <div className="mt-5 rounded-3xl border border-emerald-400/35 bg-emerald-500/10 px-5 py-4">
+              <div className="mt-5 border border-emerald-400/35 bg-emerald-500/10 px-5 py-4">
                 <p className="text-sm text-emerald-950">
                   Intake is locked. Opening the live workspace now.
                 </p>
                 <Button
-                  className="mt-3 rounded-full"
+                  className="mt-3"
                   onClick={() => router.push(`/runs/${readyRunId}`)}
                   variant="secondary"
                 >
@@ -361,7 +345,7 @@ export function ObjectiveIntake() {
             ) : null}
 
             {error ? (
-              <div className="mt-4 rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-900">
+              <div className="mt-4 border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-900">
                 {error}
                 {error.toLowerCase().includes("authentication") ? (
                   <>
@@ -374,38 +358,6 @@ export function ObjectiveIntake() {
                 ) : null}
               </div>
             ) : null}
-          </div>
-
-          <div className="rounded-[1.75rem] border border-black/10 bg-stone-950 p-6 text-stone-100 shadow-[0_24px_60px_rgba(24,22,18,0.35)]">
-            <p className="text-xs uppercase tracking-[0.25em] text-stone-400">
-              Terminal Preview
-            </p>
-            <div className="mt-4 space-y-3 font-mono text-sm">
-              {[
-                ["amber", "orchestrator", "Objective received. Assessing scope and constraints."],
-                ["cyan", "researcher", "Standing by for broad-scope or evidence-heavy work."],
-                ["emerald", "operator", "Will begin execution once intake reaches ready state."],
-                ["rose", "analyst", "Will verify whether the run actually satisfies the objective."],
-              ].map(([color, label, line]) => (
-                <div className="flex gap-3" key={label}>
-                  <span
-                    className={cn(
-                      "mt-0.5 h-2.5 w-2.5 rounded-full",
-                      color === "amber" && "bg-amber-300",
-                      color === "cyan" && "bg-cyan-300",
-                      color === "emerald" && "bg-emerald-300",
-                      color === "rose" && "bg-rose-300",
-                    )}
-                  />
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.25em] text-stone-500">
-                      {label}
-                    </div>
-                    <div className="text-stone-200">{line}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
       </div>
