@@ -1,14 +1,7 @@
 "use client";
 
 import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from "react";
+import { createContext, useContext, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -49,12 +42,10 @@ export function AuthProvider({
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const previousUserIdRef = useRef<string | null>(null);
-  const syncSessionPromiseRef = useRef<Promise<void> | null>(null);
   const router = useRouter();
 
   const applySession = useEffectEvent(
-    async ({ refreshServer, session }: { refreshServer: boolean; session: Session | null }) => {
-      const nextUser = mapUser(session?.user ?? null);
+    async ({ refreshServer, nextUser }: { refreshServer: boolean; nextUser: AuthUser | null }) => {
       const previousUserId = previousUserIdRef.current;
       const nextUserId = nextUser?.id ?? null;
       const userChanged = previousUserId !== nextUserId;
@@ -64,9 +55,9 @@ export function AuthProvider({
       setIsLoading(false);
 
       if (nextUser) {
-        await setCachedAuthUser(nextUser);
+        void setCachedAuthUser(nextUser);
       } else {
-        await clearCachedAuthUser();
+        void clearCachedAuthUser();
       }
 
       if (refreshServer && (userChanged || (!nextUserId && previousUserId))) {
@@ -74,29 +65,6 @@ export function AuthProvider({
       }
     },
   );
-
-  const syncSession = useEffectEvent(async (refreshServer: boolean) => {
-    if (syncSessionPromiseRef.current) {
-      await syncSessionPromiseRef.current;
-      return;
-    }
-
-    syncSessionPromiseRef.current = (async () => {
-      try {
-        const supabase = createClient();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        await applySession({ refreshServer, session });
-      } finally {
-        setIsLoading(false);
-        syncSessionPromiseRef.current = null;
-      }
-    })();
-
-    await syncSessionPromiseRef.current;
-  });
 
   const handleAuthStateChange = useEffectEvent(
     async (event: AuthChangeEvent, session: Session | null) => {
@@ -106,25 +74,34 @@ export function AuthProvider({
         event === "USER_UPDATED";
 
       await applySession({
+        nextUser: mapUser(session?.user ?? null),
         refreshServer: shouldRefreshServer,
-        session,
       });
     },
   );
 
   useEffect(() => {
     const supabase = createClient();
+    let isMounted = true;
 
-    void (async () => {
-      const cachedUser = await getCachedAuthUser();
+    async function bootstrapAuthState() {
+      try {
+        const cachedUser = await getCachedAuthUser();
 
-      if (cachedUser) {
-        previousUserIdRef.current = cachedUser.id;
-        setUser(cachedUser);
+        if (isMounted && cachedUser) {
+          previousUserIdRef.current = cachedUser.id;
+          setUser(cachedUser);
+        }
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setIsLoading(false);
       }
+    }
 
-      await syncSession(false);
-    })();
+    void bootstrapAuthState();
 
     const {
       data: { subscription },
@@ -133,9 +110,10 @@ export function AuthProvider({
     });
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
-  }, [handleAuthStateChange, syncSession]);
+  }, [applySession, handleAuthStateChange]);
 
   return <AuthContext.Provider value={{ isLoading, user }}>{children}</AuthContext.Provider>;
 }
