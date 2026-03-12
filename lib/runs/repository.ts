@@ -90,6 +90,28 @@ export async function fetchRuns(
   return (data ?? []).map<RunListItem>(mapRun);
 }
 
+export async function fetchLatestRunBySessionId(
+  supabase: SupabaseClient,
+  params: { sessionId: string; userId: string },
+) {
+  const { data, error } = await supabase
+    .from("runs")
+    .select(
+      "id, session_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at",
+    )
+    .eq("session_id", params.sessionId)
+    .eq("user_id", params.userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? mapRun(data) : null;
+}
+
 export async function createRun(
   supabase: SupabaseClient,
   params: {

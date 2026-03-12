@@ -34,6 +34,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { RunListItem, WorkspacePayload } from "@/lib/runs/types";
 
+const RUN_TITLE_MAX_LENGTH = 30;
+
 function getTimestamp(value: string | null | undefined) {
   if (!value) {
     return Date.now();
@@ -52,7 +54,7 @@ function getRunsUpdatedAt(runs: RunListItem[]) {
 }
 
 async function fetchRuns() {
-  const response = await fetch("/api/runs", { cache: "force-cache" });
+  const response = await fetch("/api/runs", { cache: "no-store" });
   const payload = (await response.json()) as RunListItem[] & { error?: string };
   if (!response.ok) {
     throw new Error(payload.error ?? "Unable to load runs.");
@@ -62,10 +64,25 @@ async function fetchRuns() {
 
 function mergeRunIntoList(runs: RunListItem[] | undefined, workspace: WorkspacePayload) {
   if (!runs) {
-    return runs;
+    return [workspace.run];
   }
 
-  return runs.map((run) => (run.id === workspace.run.id ? workspace.run : run));
+  const hasRun = runs.some((run) => run.id === workspace.run.id);
+  const nextRuns = hasRun
+    ? runs.map((run) => (run.id === workspace.run.id ? workspace.run : run))
+    : [workspace.run, ...runs];
+
+  return nextRuns.toSorted(
+    (left, right) => getTimestamp(right.updatedAt) - getTimestamp(left.updatedAt),
+  );
+}
+
+function truncateRunTitle(objective: string) {
+  if (objective.length <= RUN_TITLE_MAX_LENGTH) {
+    return objective;
+  }
+
+  return `${objective.slice(0, RUN_TITLE_MAX_LENGTH - 3).trimEnd()}...`;
 }
 
 function buildRunHref(pathname: string, runId: string) {
@@ -153,7 +170,8 @@ export function RunsDashboardClient({
     queryFn: fetchRuns,
     initialData: initialRuns,
     initialDataUpdatedAt: getRunsUpdatedAt(initialRuns),
-    staleTime: 1000 * 30,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const runs = runsQuery.data ?? [];
@@ -183,7 +201,8 @@ export function RunsDashboardClient({
       initialWorkspace && initialWorkspace.run.id === deferredRunId
         ? getTimestamp(initialWorkspace.run.updatedAt)
         : undefined,
-    staleTime: 1000 * 60,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const advanceMutation = useMutation({
@@ -265,7 +284,7 @@ export function RunsDashboardClient({
                   return (
                     <Button
                       className={cn(
-                        "h-auto w-full items-start justify-start border p-0 text-left whitespace-normal",
+                        "h-auto w-full items-start justify-start border border-border p-0 text-left whitespace-normal",
                         isActive && "border-primary bg-muted",
                       )}
                       key={run.id}
@@ -277,22 +296,22 @@ export function RunsDashboardClient({
                       variant="ghost"
                     >
                       <div className="w-full space-y-4 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap gap-2">
-                              <Badge variant={isActive ? "default" : "secondary"}>{run.status}</Badge>
-                              <Badge variant="outline">
-                                {run.executionMode.replace("_", " ")}
-                              </Badge>
-                            </div>
-                            <h2 className="line-clamp-2 text-sm font-medium">{run.objective}</h2>
-                          </div>
+                        <div className="space-y-2">
+                          <h2 className="text-sm font-medium" title={run.objective}>
+                            {truncateRunTitle(run.objective)}
+                          </h2>
                         </div>
                         {(run.finalSummary ?? run.readinessSummary) ? (
                           <p className="line-clamp-3 text-xs text-muted-foreground">
                             {run.finalSummary ?? run.readinessSummary}
                           </p>
                         ) : null}
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant={isActive ? "default" : "secondary"}>{run.status}</Badge>
+                          <Badge variant="outline">
+                            {run.executionMode.replace("_", " ")}
+                          </Badge>
+                        </div>
                         <Separator />
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <Clock3Icon className="size-3.5" />

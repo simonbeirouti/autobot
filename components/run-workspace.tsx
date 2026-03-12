@@ -305,21 +305,21 @@ export function RunWorkspaceView({
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
       <Card className="overflow-hidden border-none">
         <CardHeader className="-mt-2">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div className="space-y-3">
-              <CardTitle className="font-serif text-3xl leading-tight xl:text-4xl">
+          <div className="flex flex-col gap-4">
+            <div className="min-w-0 space-y-3">
+              <CardTitle className="w-full font-serif text-lg leading-tight">
                 {data.run.objective}
               </CardTitle>
-              <p className="max-w-4xl text-sm text-muted-foreground">
+              <p className="max-w-5xl text-sm text-muted-foreground">
                 {data.run.finalSummary ?? data.run.readinessSummary}
               </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">{data.run.executionMode.replace("_", " ")}</Badge>
-              <Badge variant="outline">{data.run.status}</Badge>
-              <Badge variant="outline">
-                Updated {formatDistanceToNowStrict(new Date(data.run.updatedAt))} ago
-              </Badge>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">{data.run.executionMode.replace("_", " ")}</Badge>
+                <Badge variant="outline">{data.run.status}</Badge>
+                <Badge variant="outline">
+                  Updated {formatDistanceToNowStrict(new Date(data.run.updatedAt))} ago
+                </Badge>
+              </div>
             </div>
           </div>
         </CardHeader>

@@ -4,6 +4,7 @@ import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { getConfiguredModel } from "@/lib/agents/model";
 import {
   clarificationResultSchema,
+  type ClarificationQuestionDraft,
   type ClarificationResult,
   type ClarificationTaskDraft,
 } from "@/lib/agents/schemas";
@@ -126,6 +127,42 @@ function countStructuredAnswers(content: string) {
   ).filter((match) => match[1]?.trim().length > 0).length;
 }
 
+function buildDraftMarkdown(params: {
+  objective: string;
+  summary: string;
+  executionMode: ExecutionMode;
+  tasks: ClarificationTaskDraft[];
+  eventNarrative: string[];
+}) {
+  const taskLines = params.tasks
+    .map((task, index) => {
+      const agentId = normalizeAgentId(task.agentId);
+      return `${index + 1}. **${task.title}** (${AGENT_STYLES[agentId].label})${task.description ? `\n   - ${task.description}` : ""}`;
+    })
+    .join("\n");
+
+  const narrativeLines = params.eventNarrative.map((item) => `- ${item}`).join("\n");
+
+  return [
+    "# Plan of action",
+    "",
+    "## Objective",
+    params.objective,
+    "",
+    "## Intake summary",
+    params.summary,
+    "",
+    "## Execution mode",
+    params.executionMode === "multi_agent" ? "Multi-agent" : "Single-agent",
+    "",
+    "## Initial tasks",
+    taskLines || "- No tasks generated yet.",
+    "",
+    "## Notes",
+    narrativeLines || "- No additional notes.",
+  ].join("\n");
+}
+
 function fallbackClarification(objective: string, transcript: TranscriptTurn[]): ClarificationResult {
   const userTurns = transcript.filter((turn) => turn.role === "user");
   const objectiveLower = objective.toLowerCase();
@@ -144,10 +181,26 @@ function fallbackClarification(objective: string, transcript: TranscriptTurn[]):
       confidenceToProceed: 0.42,
       executionMode: isBroadObjective ? "multi_agent" : "single_agent",
       questions: [
-        "What specific outcome would make this objective a success?",
-        "Who is the primary audience or customer for this work?",
-        "What deadline or operating constraint should the agent respect?",
+        {
+          question: "What specific outcome would make this objective a success?",
+          description: "The agent needs a clear definition of success so it can optimize the plan around a concrete result.",
+          optional: false,
+          inputKind: "textarea",
+        },
+        {
+          question: "Who is the primary audience or customer for this work?",
+          description: "The intended audience changes the scope, tone, and execution priorities.",
+          optional: false,
+          inputKind: "textarea",
+        },
+        {
+          question: "What deadline or operating constraint should the agent respect?",
+          description: "Time, tooling, and compliance constraints affect how ambitious the first execution plan should be.",
+          optional: true,
+          inputKind: "textarea",
+        },
       ],
+      draftMarkdown: "",
       tasks: [],
       eventNarrative: [
         "Intake review started.",
@@ -199,22 +252,32 @@ function fallbackClarification(objective: string, transcript: TranscriptTurn[]):
           },
         ];
 
+  const summary =
+    executionMode === "multi_agent"
+      ? "The objective is actionable and broad enough to justify specialist delegation."
+      : "The objective is actionable and compact enough for a focused single-agent run.";
+  const eventNarrative = [
+    "Clarification is complete.",
+    executionMode === "multi_agent"
+      ? "The orchestrator selected a delegated execution path."
+      : "The orchestrator selected a focused single-agent path.",
+  ];
+
   return {
     status: "ready_to_execute",
-    summary:
-      executionMode === "multi_agent"
-        ? "The objective is actionable and broad enough to justify specialist delegation."
-        : "The objective is actionable and compact enough for a focused single-agent run.",
+    summary,
     confidenceToProceed: 0.82,
     executionMode,
     questions: [],
+    draftMarkdown: buildDraftMarkdown({
+      objective,
+      summary,
+      executionMode,
+      tasks,
+      eventNarrative,
+    }),
     tasks,
-    eventNarrative: [
-      "Clarification is complete.",
-      executionMode === "multi_agent"
-        ? "The orchestrator selected a delegated execution path."
-        : "The orchestrator selected a focused single-agent path.",
-    ],
+    eventNarrative,
   };
 }
 
@@ -262,7 +325,27 @@ async function callDeepClarifier(objective: string, transcript: TranscriptTurn[]
     });
     const structuredResponse = (result as { structuredResponse?: unknown }).structuredResponse;
 
-    return clarificationResultSchema.parse(structuredResponse);
+    const parsed = clarificationResultSchema.parse(structuredResponse);
+    return {
+      ...parsed,
+      draftMarkdown:
+        parsed.draftMarkdown ||
+        (parsed.status === "ready_to_execute"
+          ? buildDraftMarkdown({
+              objective,
+              summary: parsed.summary,
+              executionMode: parsed.executionMode,
+              tasks: parsed.tasks,
+              eventNarrative: parsed.eventNarrative,
+            })
+          : ""),
+      questions: parsed.questions.map<ClarificationQuestionDraft>((question) => ({
+        question: question.question,
+        description: question.description,
+        optional: question.optional ?? false,
+        inputKind: question.inputKind ?? "textarea",
+      })),
+    };
   } catch {
     return fallbackClarification(objective, transcript);
   }
