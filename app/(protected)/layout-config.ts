@@ -123,14 +123,14 @@ export const protectedNavSecondary: SidebarNavItem[] = [
 export const protectedProjects: SidebarProjectItem[] = [
   {
     name: "Runs",
-    href: "/runs",
+    href: "/dashboard/runs",
     icon: Footprints,
   },
 ];
 
 export const protectedRouteTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
-  "/runs": "Runs",
+  "/dashboard/runs": "Runs",
 };
 
 function formatSegment(segment: string) {
@@ -143,17 +143,32 @@ function formatSegment(segment: string) {
 
 export function getProtectedBreadcrumbs(pathname: string) {
   const segments = pathname.split("/").filter(Boolean);
+  const dashboardCrumb = {
+    href: "/dashboard",
+    title: protectedRouteTitles["/dashboard"],
+  };
 
-  return segments.map((segment, index) => {
+  if (segments.length === 0 || pathname === "/dashboard") {
+    return [dashboardCrumb];
+  }
+
+  const breadcrumbs = [dashboardCrumb];
+
+  for (let index = 0; index < segments.length; index += 1) {
     const href = `/${segments.slice(0, index + 1).join("/")}`;
 
-    return {
+    if (href === dashboardCrumb.href) {
+      continue;
+    }
+
+    const parentHref = `/${segments.slice(0, index).join("/")}`;
+    breadcrumbs.push({
       href,
       title:
         protectedRouteTitles[href] ??
-        (index > 0 && protectedRouteTitles[`/${segments[index - 1]}`] === "Runs"
-          ? segment
-          : formatSegment(segment)),
-    };
-  });
+        (protectedRouteTitles[parentHref] === "Runs" ? segments[index] : formatSegment(segments[index])),
+    });
+  }
+
+  return breadcrumbs;
 }

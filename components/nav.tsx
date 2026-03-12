@@ -11,7 +11,7 @@ export default function Nav() {
                     <Link href={"/"}>AutoBot</Link>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Link href="/protected">Protected</Link>
+                    <Link href="/dashboard">Dashboard</Link>
                     <Suspense fallback={null}>
                         <AuthButton />
                     </Suspense>

@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ClarificationMessage,
   RunEvent,
+  RunListItem,
   RunRecord,
   RunTask,
   TaskStatus,
@@ -68,6 +69,25 @@ export async function fetchClarificationTranscript(
     questions: (row.questions ?? []) as string[],
     createdAt: row.created_at,
   }));
+}
+
+export async function fetchRuns(
+  supabase: SupabaseClient,
+  params: { userId: string },
+) {
+  const { data, error } = await supabase
+    .from("runs")
+    .select(
+      "id, session_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at",
+    )
+    .eq("user_id", params.userId)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map<RunListItem>(mapRun);
 }
 
 export async function createRun(

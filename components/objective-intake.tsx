@@ -7,7 +7,6 @@ import { startTransition, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 
 type IntakeResponse = {
   sessionId: string;
@@ -206,7 +205,7 @@ export function ObjectiveIntake() {
 
     const timeout = window.setTimeout(() => {
       startTransition(() => {
-        router.push(`/runs/${readyRunId}`);
+        router.push(`/dashboard/runs?runId=${readyRunId}`);
       });
     }, 1200);
 
@@ -336,7 +335,7 @@ export function ObjectiveIntake() {
                 </p>
                 <Button
                   className="mt-3"
-                  onClick={() => router.push(`/runs/${readyRunId}`)}
+                  onClick={() => router.push(`/dashboard/runs?runId=${readyRunId}`)}
                   variant="secondary"
                 >
                   Open workspace

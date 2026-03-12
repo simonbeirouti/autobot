@@ -45,6 +45,8 @@ export type RunRecord = {
   updatedAt: string;
 };
 
+export type RunListItem = RunRecord;
+
 export type RunTask = {
   id: string;
   runId: string;
@@ -102,4 +104,3 @@ export type WorkspacePayload = {
   events: RunEvent[];
   usage: UsageRecord[];
 };
-
