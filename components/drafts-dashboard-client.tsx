@@ -30,6 +30,9 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,6 +46,7 @@ import type { IntakeDraft, IntakeFlowResponse, IntakeQuestion } from "@/lib/inta
 import { cn } from "@/lib/utils";
 
 type DraftWorkspaceMode = "questions" | "review";
+type QuestionResponse = IntakeQuestion["response"];
 
 function getTimestamp(value: string | null | undefined) {
   if (!value) {
@@ -65,18 +69,92 @@ function getActiveDrafts(drafts: IntakeDraft[]) {
   return sortDraftsByCreatedAt(drafts.filter(isActiveIntakeDraft));
 }
 
+function cloneResponse(response?: Partial<QuestionResponse>): QuestionResponse {
+  return {
+    selectedOptionIds: response?.selectedOptionIds ?? [],
+    otherText: response?.otherText ?? "",
+    text: response?.text ?? "",
+  };
+}
+
+function getInitialResponse(question: IntakeQuestion): QuestionResponse {
+  const hasSavedResponse =
+    question.response.selectedOptionIds.length > 0 ||
+    question.response.otherText.trim().length > 0 ||
+    question.response.text.trim().length > 0;
+
+  if (hasSavedResponse) {
+    return cloneResponse(question.response);
+  }
+
+  return {
+    selectedOptionIds: [...question.prefill.selectedOptionIds],
+    otherText: question.prefill.otherText,
+    text: question.prefill.text,
+  };
+}
+
 function normalizeAnswers(questions: IntakeQuestion[]) {
-  return Object.fromEntries(questions.map((question) => [question.id, question.answer]));
+  return Object.fromEntries(questions.map((question) => [question.id, getInitialResponse(question)]));
+}
+
+function buildAnswerSummary(question: IntakeQuestion, response: QuestionResponse) {
+  if (question.inputKind === "text") {
+    return response.text.trim();
+  }
+
+  const selectedLabels = response.selectedOptionIds
+    .filter((optionId) => optionId !== "__other__")
+    .map((optionId) => question.options.find((option) => option.id === optionId)?.label ?? optionId)
+    .filter((value) => value.length > 0);
+
+  return [...selectedLabels, response.otherText.trim()].filter((value) => value.length > 0).join(", ");
+}
+
+function isQuestionAnswered(question: IntakeQuestion, response: QuestionResponse | undefined) {
+  if (question.isOptional) {
+    return true;
+  }
+
+  if (!response) {
+    return false;
+  }
+
+  if (question.inputKind === "text") {
+    return response.text.trim().length > 0;
+  }
+
+  return response.selectedOptionIds.length > 0 || response.otherText.trim().length > 0;
+}
+
+function shouldShowOtherInput(question: IntakeQuestion, response: QuestionResponse | undefined) {
+  if (!question.allowOther || !response) {
+    return false;
+  }
+
+  if (question.inputKind === "multi_select") {
+    return response.otherText.trim().length > 0 || response.selectedOptionIds.includes("__other__");
+  }
+
+  return response.selectedOptionIds.includes("__other__");
+}
+
+function serializeResponse(response: QuestionResponse | undefined) {
+  return JSON.stringify({
+    selectedOptionIds: [...(response?.selectedOptionIds ?? [])].sort(),
+    otherText: response?.otherText?.trim() ?? "",
+    text: response?.text?.trim() ?? "",
+  });
 }
 
 function haveAnswersChanged(
-  baselineAnswers: Record<string, string>,
-  answers: Record<string, string>,
+  baselineAnswers: Record<string, QuestionResponse>,
+  answers: Record<string, QuestionResponse>,
 ) {
   const questionIds = new Set([...Object.keys(baselineAnswers), ...Object.keys(answers)]);
 
   return Array.from(questionIds).some(
-    (questionId) => (answers[questionId] ?? "").trim() !== (baselineAnswers[questionId] ?? "").trim(),
+    (questionId) => serializeResponse(answers[questionId]) !== serializeResponse(baselineAnswers[questionId]),
   );
 }
 
@@ -171,8 +249,8 @@ function DraftWorkspaceView({
   onStartExecution,
 }: {
   flow: IntakeFlowResponse;
-  answers: Record<string, string>;
-  generatedAnswers: Record<string, string>;
+  answers: Record<string, QuestionResponse>;
+  generatedAnswers: Record<string, QuestionResponse>;
   activeQuestionId: string | null;
   mode: DraftWorkspaceMode;
   reviewMarkdown: string;
@@ -181,7 +259,7 @@ function DraftWorkspaceView({
   isSubmitting: boolean;
   isExecuting: boolean;
   error: string | null;
-  onAnswerChange: (questionId: string, value: string) => void;
+  onAnswerChange: (questionId: string, response: QuestionResponse) => void;
   onQuestionFocus: (questionId: string) => void;
   onGenerate: () => void;
   onToggleMode: (mode: DraftWorkspaceMode) => void;
@@ -192,10 +270,10 @@ function DraftWorkspaceView({
 }) {
   const activeQuestions = flow.questions;
   const answeredQuestionCount = activeQuestions.filter((question) =>
-    (answers[question.id] ?? "").trim().length > 0,
+    isQuestionAnswered(question, answers[question.id]),
   ).length;
   const areAllQuestionsComplete = activeQuestions.every(
-    (question) => (answers[question.id] ?? "").trim().length > 0,
+    (question) => isQuestionAnswered(question, answers[question.id]),
   );
   const canReviewDraft =
     flow.draft.status === "review_ready" ||
@@ -214,7 +292,7 @@ function DraftWorkspaceView({
               </CardTitle>
               <p className="max-w-5xl text-sm text-muted-foreground">
                 {flow.draft.clarificationSummary ??
-                  "Answer the remaining questions to generate a draft plan."}
+                  "Answer the next decisions so AutoBot can generate the draft plan."}
               </p>
               <div className="flex flex-wrap gap-2">
                 <Badge variant={flow.draft.status === "review_ready" ? "default" : "outline"}>
@@ -260,7 +338,7 @@ function DraftWorkspaceView({
               <p className="text-muted-foreground">
                 {flow.draft.status === "review_ready"
                   ? "Update answers and regenerate the draft if you need to change direction."
-                  : "Answer each clarification prompt so AutoBot can assemble the draft plan."}
+                  : `AutoBot still needs ${Math.max(activeQuestions.length - answeredQuestionCount, 0)} more ${Math.max(activeQuestions.length - answeredQuestionCount, 0) === 1 ? "decision" : "decisions"} to assemble the draft plan.`}
               </p>
             </button>
 
@@ -312,7 +390,8 @@ function DraftWorkspaceView({
                 Capture the context the agent needs before generating or regenerating the draft.
               </CardDescription>
             </CardHeader>
-            <CardContent className="min-h-0 flex-1 overflow-y-auto">
+            <CardContent className="min-h-0 flex-1 overflow-hidden pb-0">
+              <div className="h-full overflow-y-auto pb-5">
               {activeQuestions.length > 0 ? (
                 <div className="space-y-5">
                   {activeQuestions.map((question, index) => (
@@ -324,13 +403,160 @@ function DraftWorkspaceView({
                         </Badge>
                       </div>
                       <p className="text-sm text-muted-foreground">{question.description}</p>
-                      <Textarea
-                        className="min-h-32"
-                        onChange={(event) => onAnswerChange(question.id, event.target.value)}
-                        onFocus={() => onQuestionFocus(question.id)}
-                        placeholder="Add the context the agent needs..."
-                        value={answers[question.id] ?? ""}
-                      />
+                      {question.inputKind === "text" ? (
+                        <Textarea
+                          className="min-h-32"
+                          onChange={(event) =>
+                            onAnswerChange(question.id, {
+                              ...cloneResponse(answers[question.id]),
+                              text: event.target.value,
+                            })
+                          }
+                          onFocus={() => onQuestionFocus(question.id)}
+                          placeholder={question.otherPlaceholder || "Add the context the agent needs..."}
+                          value={answers[question.id]?.text ?? ""}
+                        />
+                      ) : question.inputKind === "single_select" ? (
+                        <RadioGroup
+                          onValueChange={(value) => {
+                            onQuestionFocus(question.id);
+                            onAnswerChange(question.id, {
+                              ...cloneResponse(answers[question.id]),
+                              selectedOptionIds: [value],
+                              otherText: value === "__other__" ? answers[question.id]?.otherText ?? "" : "",
+                            });
+                          }}
+                          value={answers[question.id]?.selectedOptionIds[0] ?? ""}
+                        >
+                          {question.options.map((option) => (
+                            <label
+                              className={cn(
+                                "flex cursor-pointer items-start gap-3 border p-3 transition-colors",
+                                answers[question.id]?.selectedOptionIds[0] === option.id && "border-primary bg-muted/60",
+                              )}
+                              key={option.id}
+                            >
+                              <RadioGroupItem value={option.id} />
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium">{option.label}</span>
+                                  {option.isRecommended ? <Badge variant="secondary">Suggested</Badge> : null}
+                                </div>
+                                {option.description ? (
+                                  <p className="text-xs text-muted-foreground">{option.description}</p>
+                                ) : null}
+                              </div>
+                            </label>
+                          ))}
+                          {question.allowOther ? (
+                            <label
+                              className={cn(
+                                "flex cursor-pointer items-start gap-3 border p-3 transition-colors",
+                                answers[question.id]?.selectedOptionIds[0] === "__other__" && "border-primary bg-muted/60",
+                              )}
+                            >
+                              <RadioGroupItem value="__other__" />
+                              <div className="space-y-1">
+                                <span className="text-sm font-medium">{question.otherLabel}</span>
+                                <p className="text-xs text-muted-foreground">
+                                  Provide a custom answer that is not listed.
+                                </p>
+                              </div>
+                            </label>
+                          ) : null}
+                        </RadioGroup>
+                      ) : (
+                        <div className="space-y-2">
+                          {question.options.map((option) => {
+                            const isChecked = answers[question.id]?.selectedOptionIds.includes(option.id) ?? false;
+                            return (
+                              <label
+                                className={cn(
+                                  "flex cursor-pointer items-start gap-3 border p-3 transition-colors",
+                                  isChecked && "border-primary bg-muted/60",
+                                )}
+                                key={option.id}
+                              >
+                                <Checkbox
+                                  checked={isChecked}
+                                  onCheckedChange={(checked) => {
+                                    onQuestionFocus(question.id);
+                                    const current = new Set(answers[question.id]?.selectedOptionIds ?? []);
+                                    if (checked) {
+                                      current.add(option.id);
+                                    } else {
+                                      current.delete(option.id);
+                                    }
+                                    onAnswerChange(question.id, {
+                                      ...cloneResponse(answers[question.id]),
+                                      selectedOptionIds: Array.from(current),
+                                    });
+                                  }}
+                                />
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium">{option.label}</span>
+                                    {option.isRecommended ? <Badge variant="secondary">Suggested</Badge> : null}
+                                  </div>
+                                  {option.description ? (
+                                    <p className="text-xs text-muted-foreground">{option.description}</p>
+                                  ) : null}
+                                </div>
+                              </label>
+                            );
+                          })}
+                          {question.allowOther ? (
+                            <label
+                              className={cn(
+                                "flex cursor-pointer items-start gap-3 border p-3 transition-colors",
+                                shouldShowOtherInput(question, answers[question.id]) && "border-primary bg-muted/60",
+                              )}
+                            >
+                              <Checkbox
+                                checked={shouldShowOtherInput(question, answers[question.id])}
+                                onCheckedChange={(checked) => {
+                                  onQuestionFocus(question.id);
+                                  const current = new Set(answers[question.id]?.selectedOptionIds ?? []);
+                                  if (checked) {
+                                    current.add("__other__");
+                                  } else {
+                                    current.delete("__other__");
+                                  }
+                                  onAnswerChange(question.id, {
+                                    ...cloneResponse(answers[question.id]),
+                                    selectedOptionIds: Array.from(current),
+                                    otherText: checked ? answers[question.id]?.otherText ?? "" : "",
+                                  });
+                                }}
+                              />
+                              <div className="space-y-1">
+                                <span className="text-sm font-medium">{question.otherLabel}</span>
+                                <p className="text-xs text-muted-foreground">
+                                  Add a custom answer alongside the selected options.
+                                </p>
+                              </div>
+                            </label>
+                          ) : null}
+                        </div>
+                      )}
+                      {question.allowOther && shouldShowOtherInput(question, answers[question.id]) ? (
+                        <Input
+                          onChange={(event) =>
+                            onAnswerChange(question.id, {
+                              ...cloneResponse(answers[question.id]),
+                              otherText: event.target.value,
+                            })
+                          }
+                          onFocus={() => onQuestionFocus(question.id)}
+                          placeholder={question.otherPlaceholder}
+                          value={answers[question.id]?.otherText ?? ""}
+                        />
+                      ) : null}
+                      {buildAnswerSummary(question, answers[question.id] ?? cloneResponse()).trim().length > 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Current answer: {buildAnswerSummary(question, answers[question.id] ?? cloneResponse())}
+                        </p>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -345,8 +571,9 @@ function DraftWorkspaceView({
                   {error}
                 </div>
               ) : null}
+              </div>
             </CardContent>
-            <CardFooter className="justify-end gap-3 border-t">
+            <CardFooter className="min-h-16 shrink-0 justify-end gap-3 border-t">
               {areAllQuestionsComplete && (!canReviewDraft || questionAnswersChanged) ? (
                 <Button disabled={isSubmitting || isSaving} onClick={onGenerate}>
                   {isSubmitting
@@ -452,8 +679,8 @@ export function DraftsDashboardClient({
   const queryClient = useQueryClient();
   const requestedDraftId = searchParams.get("draftId");
 
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [generatedAnswers, setGeneratedAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, QuestionResponse>>({});
+  const [generatedAnswers, setGeneratedAnswers] = useState<Record<string, QuestionResponse>>({});
   const [currentStep, setCurrentStep] = useState(0);
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [reviewMarkdown, setReviewMarkdown] = useState("");
@@ -571,7 +798,7 @@ export function DraftsDashboardClient({
           currentStep,
           answers: flowQuery.data.questions.map((question) => ({
             questionId: question.id,
-            answer: answers[question.id] ?? "",
+            response: answers[question.id] ?? cloneResponse(question.response),
           })),
         }),
       });

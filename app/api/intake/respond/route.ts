@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { clarifyObjective } from "@/lib/agents/orchestrator";
+import { clarificationQuestionResponseSchema } from "@/lib/agents/schemas";
 import {
   fetchIntakeDraftWithQuestions,
   replaceIntakeQuestions,
@@ -23,7 +24,7 @@ const bodySchema = z.object({
     .array(
       z.object({
         questionId: z.string().uuid(),
-        answer: z.string().max(2000),
+        response: clarificationQuestionResponseSchema,
       }),
     )
     .min(1),
@@ -46,15 +47,37 @@ function getErrorMessage(error: unknown) {
 }
 
 function buildClarificationMessage(
-  questions: Array<{ question: string; answer: string; isOptional: boolean }>,
+  questions: Array<{
+    question: string;
+    answerText: string;
+    isOptional: boolean;
+  }>,
 ) {
   return questions
     .map((question, index) => {
-      const answer = question.answer.trim();
+      const answer = question.answerText.trim();
       const renderedAnswer = answer || (question.isOptional ? "Left open for now." : "No answer provided yet.");
       return `${index + 1}. ${question.question}\nAnswer: ${renderedAnswer}`;
     })
     .join("\n\n");
+}
+
+function formatResponseAnswer(question: {
+  inputKind: string;
+  options: Array<{ id: string; label: string }>;
+  allowOther: boolean;
+  response: { selectedOptionIds?: string[]; otherText?: string; text?: string };
+}) {
+  if (question.inputKind === "text") {
+    return question.response.text?.trim() ?? "";
+  }
+
+  const optionLabels = (question.response.selectedOptionIds ?? [])
+    .filter((optionId) => optionId !== "__other__")
+    .map((optionId) => question.options.find((option) => option.id === optionId)?.label ?? optionId)
+    .filter(Boolean);
+  const otherText = question.allowOther ? question.response.otherText?.trim() ?? "" : "";
+  return [...optionLabels, otherText].filter((value) => value.length > 0).join(", ");
 }
 
 export async function POST(request: Request) {
@@ -73,21 +96,42 @@ export async function POST(request: Request) {
 
     await updateIntakeQuestionAnswers(supabase, {
       draftId: payload.draftId,
-      answers: payload.answers,
+      answers: existing.questions.map((question) => {
+        const incoming = payload.answers.find((item) => item.questionId === question.id);
+        const response = incoming?.response ?? question.response;
+        return {
+          questionId: question.id,
+          response,
+          answerText: formatResponseAnswer({
+            inputKind: question.inputKind,
+            options: question.options,
+            allowOther: question.allowOther,
+            response,
+          }),
+        };
+      }),
     });
 
     const updatedQuestions = existing.questions.map((question) => {
       const incoming = payload.answers.find((item) => item.questionId === question.id);
       return {
         ...question,
-        answer: incoming ? incoming.answer : question.answer,
+        response: incoming ? incoming.response : question.response,
+        answer: incoming
+          ? formatResponseAnswer({
+              inputKind: question.inputKind,
+              options: question.options,
+              allowOther: question.allowOther,
+              response: incoming.response,
+            })
+          : question.answer,
       };
     });
 
     const answerMessage = buildClarificationMessage(
       updatedQuestions.map((question) => ({
         question: question.question,
-        answer: question.answer,
+        answerText: question.answer,
         isOptional: question.isOptional,
       })),
     );
@@ -110,6 +154,9 @@ export async function POST(request: Request) {
         role: message.role,
         content: message.content,
       })),
+      clarificationRounds: transcript.filter(
+        (message) => message.role === "assistant" && message.questions.length > 0,
+      ).length,
     });
 
     await appendClarificationMessage(supabase, {
@@ -117,16 +164,22 @@ export async function POST(request: Request) {
       userId: user.sub,
       role: "assistant",
       content: result.summary,
-      questions: result.questions.map((question) => question.question),
+      questions: result.questions.map((question) => question.prompt),
     });
 
     const isReviewReady = result.status === "ready_to_execute";
     const nextQuestions = isReviewReady && result.questions.length === 0
       ? updatedQuestions.map((question) => ({
-          question: question.question,
-          description: question.description,
+          id: question.questionKey ?? question.id,
+          prompt: question.question,
+          helpText: question.description,
           optional: question.isOptional,
           inputKind: question.inputKind,
+          options: question.options,
+          allowOther: question.allowOther,
+          otherLabel: question.otherLabel,
+          otherPlaceholder: question.otherPlaceholder,
+          prefill: question.prefill,
         }))
       : result.questions;
     const savedQuestions = await replaceIntakeQuestions(supabase, {

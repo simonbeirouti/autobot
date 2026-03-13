@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { clarificationQuestionResponseSchema } from "@/lib/agents/schemas";
 import {
   fetchIntakeDraftWithQuestions,
   updateIntakeDraft,
@@ -17,7 +18,7 @@ const bodySchema = z.object({
     .array(
       z.object({
         questionId: z.string().uuid(),
-        answer: z.string().max(2000),
+        response: clarificationQuestionResponseSchema,
       }),
     )
     .optional(),
@@ -61,9 +62,27 @@ export async function PATCH(
     const supabase = await createClient();
 
     if (payload.answers?.length) {
+      const existing = await fetchIntakeDraftWithQuestions(supabase, { draftId, userId: user.sub });
       await updateIntakeQuestionAnswers(supabase, {
         draftId,
-        answers: payload.answers,
+        answers: existing.questions.map((question) => {
+          const incoming = payload.answers?.find((item) => item.questionId === question.id);
+          const response = incoming?.response ?? question.response;
+          const optionLabels = (response.selectedOptionIds ?? [])
+            .filter((optionId) => optionId !== "__other__")
+            .map((optionId) => question.options.find((option) => option.id === optionId)?.label ?? optionId);
+          const answerText = question.inputKind === "text"
+            ? response.text?.trim() ?? ""
+            : [...optionLabels, response.otherText?.trim() ?? ""]
+                .filter((value) => value.length > 0)
+                .join(", ");
+
+          return {
+            questionId: question.id,
+            response,
+            answerText,
+          };
+        }),
       });
     }
 

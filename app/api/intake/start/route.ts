@@ -61,6 +61,7 @@ export async function POST(request: Request) {
     const result = await clarifyObjective({
       objective: payload.objective,
       transcript: [{ role: "user", content: payload.objective }],
+      clarificationRounds: 0,
     });
 
     await appendClarificationMessage(supabase, {
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
       userId: user.sub,
       role: "assistant",
       content: result.summary,
-      questions: result.questions.map((question) => question.question),
+      questions: result.questions.map((question) => question.prompt),
     });
 
     const isReviewReady = result.status === "ready_to_execute";

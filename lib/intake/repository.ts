@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type {
   ClarificationQuestionDraft,
+  ClarificationQuestionOption,
+  ClarificationQuestionResponse,
   ClarificationTaskDraft,
 } from "@/lib/agents/schemas";
 import type { ExecutionMode } from "@/lib/runs/types";
@@ -38,11 +40,25 @@ type IntakeQuestionRow = {
   id: string;
   draft_id: string;
   position: number;
+  question_key: string | null;
   question: string;
   description: string;
-  input_kind: "textarea";
+  input_kind: "single_select" | "multi_select" | "text" | "textarea";
+  options: ClarificationQuestionOption[] | null;
+  allow_other: boolean | null;
+  other_label: string | null;
+  other_placeholder: string | null;
   is_optional: boolean;
   answer: string | null;
+  answer_text: string | null;
+  response: ClarificationQuestionResponse | null;
+  prefill:
+    | {
+        selectedOptionIds?: string[];
+        otherText?: string;
+        text?: string;
+      }
+    | null;
   answered_at: string | null;
   created_at: string;
   updated_at: string;
@@ -73,15 +89,33 @@ function mapDraft(row: IntakeDraftRow): IntakeDraft {
 }
 
 function mapQuestion(row: IntakeQuestionRow): IntakeQuestion {
+  const legacyAnswer = row.answer_text ?? row.answer ?? "";
+  const response = {
+    selectedOptionIds: row.response?.selectedOptionIds ?? [],
+    otherText: row.response?.otherText ?? "",
+    text: row.response?.text ?? legacyAnswer,
+  };
+
   return {
     id: row.id,
     draftId: row.draft_id,
     position: row.position,
+    questionKey: row.question_key,
     question: row.question,
     description: row.description,
-    inputKind: row.input_kind,
+    inputKind: row.input_kind === "textarea" ? "text" : row.input_kind,
+    options: (row.options ?? []) as ClarificationQuestionOption[],
+    allowOther: row.allow_other ?? false,
+    otherLabel: row.other_label ?? "Other",
+    otherPlaceholder: row.other_placeholder ?? "Add a different answer",
     isOptional: row.is_optional,
-    answer: row.answer ?? "",
+    answer: legacyAnswer,
+    response,
+    prefill: {
+      selectedOptionIds: row.prefill?.selectedOptionIds ?? [],
+      otherText: row.prefill?.otherText ?? "",
+      text: row.prefill?.text ?? "",
+    },
     answeredAt: row.answered_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -224,7 +258,7 @@ export async function fetchIntakeQuestions(
   const { data, error } = await supabase
     .from("intake_questions")
     .select(
-      "id, draft_id, position, question, description, input_kind, is_optional, answer, answered_at, created_at, updated_at",
+      "id, draft_id, position, question_key, question, description, input_kind, options, allow_other, other_label, other_placeholder, is_optional, answer, answer_text, response, prefill, answered_at, created_at, updated_at",
     )
     .eq("draft_id", params.draftId)
     .order("position", { ascending: true });
@@ -275,21 +309,36 @@ export async function replaceIntakeQuestions(
       params.questions.map((question, index) => {
         const preservedQuestion = params.existingQuestions?.find(
           (existingQuestion) =>
-            existingQuestion.position === index &&
-            existingQuestion.question === question.question &&
-            existingQuestion.description === question.description &&
-            existingQuestion.inputKind === (question.inputKind ?? "textarea") &&
-            existingQuestion.isOptional === (question.optional ?? false),
+            (question.id && existingQuestion.questionKey === question.id) ||
+            (
+              existingQuestion.position === index &&
+              existingQuestion.question === question.prompt
+            ),
         );
 
         return {
           draft_id: params.draftId,
           position: index,
-          question: question.question,
-          description: question.description,
-          input_kind: question.inputKind ?? "textarea",
+          question_key: question.id,
+          question: question.prompt,
+          description: question.helpText,
+          input_kind: question.inputKind ?? "text",
+          options: question.options ?? [],
+          allow_other: question.allowOther ?? false,
+          other_label: question.otherLabel ?? "Other",
+          other_placeholder: question.otherPlaceholder ?? "Add a different answer",
           is_optional: question.optional ?? false,
           answer: preservedQuestion?.answer.trim().length ? preservedQuestion.answer : null,
+          answer_text: preservedQuestion?.answer.trim().length ? preservedQuestion.answer : null,
+          response:
+            preservedQuestion && (
+              preservedQuestion.response.selectedOptionIds.length > 0 ||
+              preservedQuestion.response.otherText.trim().length > 0 ||
+              preservedQuestion.response.text.trim().length > 0
+            )
+              ? preservedQuestion.response
+              : {},
+          prefill: question.prefill ?? {},
           answered_at: preservedQuestion?.answer.trim().length
             ? preservedQuestion.answeredAt ?? new Date().toISOString()
             : null,
@@ -297,7 +346,7 @@ export async function replaceIntakeQuestions(
       }),
     )
     .select(
-      "id, draft_id, position, question, description, input_kind, is_optional, answer, answered_at, created_at, updated_at",
+      "id, draft_id, position, question_key, question, description, input_kind, options, allow_other, other_label, other_placeholder, is_optional, answer, answer_text, response, prefill, answered_at, created_at, updated_at",
     )
     .order("position", { ascending: true });
 
@@ -312,17 +361,24 @@ export async function updateIntakeQuestionAnswers(
   supabase: SupabaseClient,
   params: {
     draftId: string;
-    answers: Array<{ questionId: string; answer: string }>;
+    answers: Array<{ questionId: string; response: ClarificationQuestionResponse; answerText: string }>;
   },
 ) {
   const now = new Date().toISOString();
 
   for (const item of params.answers) {
-    const normalizedAnswer = item.answer.trim();
+    const normalizedAnswer = item.answerText.trim();
+    const normalizedResponse: ClarificationQuestionResponse = {
+      selectedOptionIds: item.response.selectedOptionIds ?? [],
+      otherText: item.response.otherText ?? "",
+      text: item.response.text ?? "",
+    };
     const { error } = await supabase
       .from("intake_questions")
       .update({
         answer: normalizedAnswer,
+        answer_text: normalizedAnswer,
+        response: normalizedResponse,
         answered_at: normalizedAnswer ? now : null,
       })
       .eq("id", item.questionId)
