@@ -15,7 +15,7 @@ export function WorkspaceSplitLayout({
   content: ReactNode;
 }) {
   return (
-    <section className="flex min-h-0 min-w-full -mx-4 -mt-4 flex-1 flex-col gap-2 xl:grid xl:h-full xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)] xl:overflow-hidden">
+    <section className="flex min-h-0 min-w-full -mx-4 -my-4 flex-1 flex-col gap-2 xl:grid xl:h-full xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)] xl:overflow-hidden">
       {sidebar}
       <div className="min-h-0 xl:h-full xl:overflow-hidden">{content}</div>
     </section>

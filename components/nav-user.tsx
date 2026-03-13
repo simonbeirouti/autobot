@@ -9,6 +9,7 @@ import {
   SparklesIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import {
   Avatar,
@@ -30,10 +31,11 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 
-function getUserInitials(name: string, email: string | null) {
-  const source = name.trim() || email?.trim() || "User";
+function getUserInitials(name: string | null | undefined, email: string | null) {
+  const source = name?.trim() || email?.trim() || "User";
 
   return source
     .split(/\s+/)
@@ -50,10 +52,15 @@ export function NavUser({
     avatar: string;
     email: string | null;
     name: string;
-  };
+  } | null;
 }) {
   const { isMobile } = useSidebar();
   const router = useRouter();
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  useEffect(() => {
+    setHasHydrated(true);
+  }, []);
 
   async function handleLogout() {
     const supabase = createClient();
@@ -63,7 +70,11 @@ export function NavUser({
     router.refresh();
   }
 
-  const initials = getUserInitials(user.name, user.email);
+  const hydratedUser = hasHydrated ? user : null;
+  const displayName = hydratedUser?.name?.trim() || "Loading user";
+  const displayEmail = hydratedUser?.email ?? " ";
+  const initials = getUserInitials(hydratedUser?.name, hydratedUser?.email ?? null);
+  const isReady = Boolean(hydratedUser);
 
   return (
     <SidebarMenu>
@@ -73,14 +84,24 @@ export function NavUser({
             <SidebarMenuButton
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              disabled={!isReady}
             >
               <Avatar className="h-8 w-8 rounded-lg">
-                <AvatarImage src={user.avatar} alt={user.name} />
+                <AvatarImage src={hydratedUser?.avatar ?? ""} alt={displayName} />
                 <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-xs">{user.email ?? "No email available"}</span>
+                {isReady ? (
+                  <>
+                    <span className="truncate font-medium">{displayName}</span>
+                    <span className="truncate text-xs">{displayEmail}</span>
+                  </>
+                ) : (
+                  <>
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="mt-1 h-3 w-32" />
+                  </>
+                )}
               </div>
               <ChevronsUpDownIcon className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -94,12 +115,21 @@ export function NavUser({
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                 <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarImage src={user.avatar} alt={user.name} />
+                  <AvatarImage src={hydratedUser?.avatar ?? ""} alt={displayName} />
                   <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-xs">{user.email ?? "No email available"}</span>
+                  {isReady ? (
+                    <>
+                      <span className="truncate font-medium">{displayName}</span>
+                      <span className="truncate text-xs">{displayEmail}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="mt-1 h-3 w-32" />
+                    </>
+                  )}
                 </div>
               </div>
             </DropdownMenuLabel>

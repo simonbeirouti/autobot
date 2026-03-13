@@ -38,8 +38,11 @@ pnpm dev
 2. Set these additional environment variables:
 
 ```env
+LLM_PROVIDER=openai
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-4.1-mini
+ANTHROPIC_API_KEY=your_anthropic_api_key
+ANTHROPIC_MODEL=claude-sonnet-4-5
 ```
 
 3. Sign in before creating a run. Run state, telemetry, and clarification history are stored per authenticated user.

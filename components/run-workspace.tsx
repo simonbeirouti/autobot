@@ -30,6 +30,11 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {
+  dashboardQueryKeys,
+  dashboardQueryTimings,
+  fetchJson,
+} from "@/lib/query/dashboard";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -43,24 +48,14 @@ const colorClassMap: Record<string, string> = {
 };
 
 export async function fetchWorkspace(runId: string) {
-  const response = await fetch(`/api/runs/${runId}`);
-  const payload = (await response.json()) as WorkspacePayload & { error?: string };
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Unable to load run.");
-  }
-  return payload;
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}`);
 }
 
 export async function advanceWorkspace(runId: string) {
-  const response = await fetch(`/api/runs/${runId}/advance`, {
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}/advance`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
-  const payload = (await response.json()) as WorkspacePayload & { error?: string };
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Unable to advance run.");
-  }
-  return payload;
 }
 
 function groupTasks(tasks: RunTask[]) {
@@ -362,18 +357,15 @@ export function RunWorkspaceView({
 export function RunWorkspace({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
   const { data, error, isLoading } = useQuery({
-    queryKey: ["run-workspace", runId],
+    queryKey: dashboardQueryKeys.runs.workspace(runId),
     queryFn: () => fetchWorkspace(runId),
-    staleTime: 1000 * 60,
-    refetchInterval: false,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
+    staleTime: dashboardQueryTimings.runWorkspace.staleTime,
   });
 
   const advanceMutation = useMutation({
     mutationFn: () => advanceWorkspace(runId),
     onSuccess: (payload) => {
-      queryClient.setQueryData(["run-workspace", runId], payload);
+      queryClient.setQueryData(dashboardQueryKeys.runs.workspace(runId), payload);
     },
   });
 

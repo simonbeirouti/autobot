@@ -2,7 +2,7 @@
 
 import { startTransition, useDeferredValue, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsRestoring, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import { Clock3Icon, FootprintsIcon } from "lucide-react";
 
@@ -30,11 +30,20 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {
+  dashboardQueryKeys,
+  dashboardQueryTimings,
+  fetchJson,
+  getRunsUpdatedAt,
+  mergeRunIntoList,
+} from "@/lib/query/dashboard";
+import { useDelayedVisibility } from "@/lib/query/use-delayed-visibility";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { RunListItem, WorkspacePayload } from "@/lib/runs/types";
 
 const RUN_TITLE_MAX_LENGTH = 30;
+const ERROR_VISIBILITY_DELAY_MS = 1000;
 
 function getTimestamp(value: string | null | undefined) {
   if (!value) {
@@ -45,36 +54,8 @@ function getTimestamp(value: string | null | undefined) {
   return Number.isNaN(parsed) ? Date.now() : parsed;
 }
 
-function getRunsUpdatedAt(runs: RunListItem[]) {
-  if (runs.length === 0) {
-    return Date.now();
-  }
-
-  return Math.max(...runs.map((run) => getTimestamp(run.updatedAt)));
-}
-
 async function fetchRuns() {
-  const response = await fetch("/api/runs", { cache: "no-store" });
-  const payload = (await response.json()) as RunListItem[] & { error?: string };
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Unable to load runs.");
-  }
-  return payload as RunListItem[];
-}
-
-function mergeRunIntoList(runs: RunListItem[] | undefined, workspace: WorkspacePayload) {
-  if (!runs) {
-    return [workspace.run];
-  }
-
-  const hasRun = runs.some((run) => run.id === workspace.run.id);
-  const nextRuns = hasRun
-    ? runs.map((run) => (run.id === workspace.run.id ? workspace.run : run))
-    : [workspace.run, ...runs];
-
-  return nextRuns.toSorted(
-    (left, right) => getTimestamp(right.updatedAt) - getTimestamp(left.updatedAt),
-  );
+  return fetchJson<RunListItem[]>("/api/runs");
 }
 
 function truncateRunTitle(objective: string) {
@@ -113,26 +94,31 @@ export function RunsDashboardClient({
   initialWorkspace,
   initialSelectedRunId,
 }: {
-  initialRuns: RunListItem[];
-  initialWorkspace: WorkspacePayload | null;
-  initialSelectedRunId: string | null;
+  initialRuns?: RunListItem[];
+  initialWorkspace?: WorkspacePayload | null;
+  initialSelectedRunId?: string | null;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+  const isRestoring = useIsRestoring();
   const requestedRunId = searchParams.get("runId");
 
   const runsQuery = useQuery({
-    queryKey: ["runs"],
+    queryKey: dashboardQueryKeys.runs.all,
     queryFn: fetchRuns,
-    initialData: initialRuns,
-    initialDataUpdatedAt: getRunsUpdatedAt(initialRuns),
-    staleTime: 0,
-    refetchOnMount: "always",
+    ...(initialRuns
+      ? {
+          initialData: initialRuns,
+          initialDataUpdatedAt: getRunsUpdatedAt(initialRuns),
+        }
+      : {}),
+    staleTime: dashboardQueryTimings.runs.staleTime,
   });
 
   const runs = runsQuery.data ?? [];
+  const showRunsError = useDelayedVisibility(Boolean(runsQuery.error), ERROR_VISIBILITY_DELAY_MS);
   const selectedRunId =
     requestedRunId && runs.some((run) => run.id === requestedRunId)
       ? requestedRunId
@@ -150,7 +136,9 @@ export function RunsDashboardClient({
   }, [pathname, requestedRunId, router, runs.length, selectedRunId]);
 
   const workspaceQuery = useQuery({
-    queryKey: ["run-workspace", deferredRunId],
+    queryKey: deferredRunId
+      ? dashboardQueryKeys.runs.workspace(deferredRunId)
+      : dashboardQueryKeys.runs.workspace("pending"),
     queryFn: () => fetchWorkspace(deferredRunId!),
     enabled: Boolean(deferredRunId),
     initialData:
@@ -159,19 +147,23 @@ export function RunsDashboardClient({
       initialWorkspace && initialWorkspace.run.id === deferredRunId
         ? getTimestamp(initialWorkspace.run.updatedAt)
         : undefined,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: dashboardQueryTimings.runWorkspace.staleTime,
   });
 
   const advanceMutation = useMutation({
     mutationFn: () => advanceWorkspace(selectedRunId!),
     onSuccess: (workspace) => {
-      queryClient.setQueryData(["run-workspace", workspace.run.id], workspace);
-      queryClient.setQueryData<RunListItem[] | undefined>(["runs"], (currentRuns) =>
+      queryClient.setQueryData(dashboardQueryKeys.runs.workspace(workspace.run.id), workspace);
+      queryClient.setQueryData<RunListItem[] | undefined>(dashboardQueryKeys.runs.all, (currentRuns) =>
         mergeRunIntoList(currentRuns, workspace),
       );
     },
   });
+
+  const showWorkspaceError = useDelayedVisibility(
+    Boolean(workspaceQuery.error),
+    ERROR_VISIBILITY_DELAY_MS,
+  );
 
   useEffect(() => {
     if (!workspaceQuery.data || !selectedRunId) {
@@ -201,13 +193,13 @@ export function RunsDashboardClient({
           description="Recent and in-flight runs stay cached locally so this workspace reopens quickly."
           title="Execution history"
         >
-          {runsQuery.error ? (
+          {showRunsError ? (
             <div className="border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
               {runsQuery.error instanceof Error ? runsQuery.error.message : "Unable to load runs."}
             </div>
           ) : null}
 
-          {!runsQuery.isLoading && !runsQuery.error && runs.length === 0 ? (
+          {!isRestoring && !runsQuery.isLoading && !showRunsError && runs.length === 0 ? (
             <Empty className="border-border">
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -271,7 +263,9 @@ export function RunsDashboardClient({
         </WorkspaceSidebarPanel>
       }
       content={
-        !selectedRunId ? (
+        !selectedRunId && (isRestoring || runsQuery.isLoading) ? (
+          <RunWorkspaceSkeleton />
+        ) : !selectedRunId ? (
           <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
             <CardContent className="flex h-full items-center justify-center py-0">
               <Empty className="max-w-md border-border">
@@ -287,7 +281,7 @@ export function RunsDashboardClient({
               </Empty>
             </CardContent>
           </Card>
-        ) : workspaceQuery.isLoading ? (
+        ) : workspaceQuery.isLoading || (workspaceQuery.error && !showWorkspaceError) ? (
           <RunWorkspaceSkeleton />
         ) : workspaceQuery.error || !workspaceQuery.data ? (
           <Card className="min-h-[320px] overflow-hidden xl:h-full xl:min-h-0">

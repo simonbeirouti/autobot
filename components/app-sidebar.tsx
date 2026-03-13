@@ -27,7 +27,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const { user } = useAuth();
 
   return (
-    <Sidebar variant="inset" {...props}>
+    <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -50,11 +50,9 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
         <NavProjects projects={protectedProjects} />
         <NavSecondary items={protectedNavSecondary} className="mt-auto" />
       </SidebarContent>
-      {user ? (
-        <SidebarFooter>
-          <NavUser user={user} />
-        </SidebarFooter>
-      ) : null}
+      <SidebarFooter>
+        <NavUser user={user} />
+      </SidebarFooter>
     </Sidebar>
   );
 }

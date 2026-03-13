@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,13 @@ import {
   isActiveIntakeDraft,
   sortDraftsByCreatedAt,
 } from "@/lib/intake/presentation";
+import {
+  dashboardQueryKeys,
+  dashboardQueryTimings,
+  fetchJson,
+  upsertDraftInList,
+} from "@/lib/query/dashboard";
+import { useDelayedVisibility } from "@/lib/query/use-delayed-visibility";
 import type { IntakeDraft, IntakeFlowResponse } from "@/lib/intake/types";
 import { cn } from "@/lib/utils";
 
@@ -29,65 +37,66 @@ const draftVisibilityClasses = [
   "opacity-40",
   "opacity-20",
 ] as const;
-
-async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
-  const response = await fetch(input, init);
-  const payload = (await response.json()) as T & { error?: string };
-
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Request failed.");
-  }
-
-  return payload as T;
-}
+const ERROR_VISIBILITY_DELAY_MS = 500;
 
 export function ObjectiveIntake() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [objective, setObjective] = useState("");
-  const [drafts, setDrafts] = useState<IntakeDraft[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const canStart = objective.trim().length >= 8 && !isSubmitting;
-
-  async function refreshDrafts() {
-    const nextDrafts = await fetchJson<IntakeDraft[]>("/api/intake/drafts");
-    setDrafts(sortDraftsByCreatedAt(nextDrafts.filter(isActiveIntakeDraft)));
-  }
+  const [hasHydrated, setHasHydrated] = useState(false);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        await refreshDrafts();
-      } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Unable to load drafts.");
-      }
-    })();
+    setHasHydrated(true);
   }, []);
 
-  async function submitObjective() {
-    setIsSubmitting(true);
-    setError(null);
+  const draftsQuery = useQuery({
+    queryKey: dashboardQueryKeys.drafts.all,
+    queryFn: () => fetchJson<IntakeDraft[]>("/api/intake/drafts"),
+    staleTime: dashboardQueryTimings.drafts.staleTime,
+    select: (drafts) => sortDraftsByCreatedAt(drafts.filter(isActiveIntakeDraft)),
+  });
+  const showDraftsError = useDelayedVisibility(
+    Boolean(draftsQuery.error) && hasHydrated,
+    ERROR_VISIBILITY_DELAY_MS,
+  );
 
-    try {
-      const flow = await fetchJson<IntakeFlowResponse>("/api/intake/start", {
+  const startDraftMutation = useMutation({
+    mutationFn: async (nextObjective: string) =>
+      fetchJson<IntakeFlowResponse>("/api/intake/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ objective }),
-      });
-
+        body: JSON.stringify({ objective: nextObjective }),
+      }),
+    onMutate: () => {
+      setError(null);
+    },
+    onSuccess: (flow) => {
+      queryClient.setQueryData<IntakeDraft[] | undefined>(
+        dashboardQueryKeys.drafts.all,
+        (currentDrafts) => upsertDraftInList(currentDrafts, flow.draft),
+      );
+      queryClient.setQueryData(dashboardQueryKeys.drafts.flow(flow.draft.id), flow);
       startTransition(() => {
         router.push(`/dashboard/drafts?draftId=${flow.draft.id}`);
       });
-    } catch (submissionError) {
+    },
+    onError: (submissionError) => {
       setError(
         submissionError instanceof Error
           ? submissionError.message
           : "Unable to start intake.",
       );
-    } finally {
-      setIsSubmitting(false);
-    }
+    },
+  });
+
+  const drafts = draftsQuery.data ?? [];
+  const showDrafts = hasHydrated && drafts.length > 0;
+  const isSubmitting = startDraftMutation.isPending;
+  const canStart = objective.trim().length >= 8 && !isSubmitting;
+
+  function submitObjective() {
+    startDraftMutation.mutate(objective);
   }
 
   return (
@@ -132,7 +141,7 @@ export function ObjectiveIntake() {
           </div>
         </div>
 
-        {drafts.length > 0 ? (
+        {showDrafts ? (
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
             {drafts.slice(0, 5).map((draft, index) => (
               <Link
@@ -187,6 +196,14 @@ export function ObjectiveIntake() {
                 {" "}to continue.
               </>
             ) : null}
+          </div>
+        ) : null}
+
+        {showDraftsError && !error ? (
+          <div className="mx-auto w-full max-w-3xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {draftsQuery.error instanceof Error
+              ? draftsQuery.error.message
+              : "Unable to load drafts."}
           </div>
         ) : null}
       </div>

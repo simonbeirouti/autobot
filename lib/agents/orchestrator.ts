@@ -1,7 +1,6 @@
-import { createDeepAgent } from "deepagents";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 
-import { getConfiguredModel } from "@/lib/agents/model";
+import { getConfiguredClarifier } from "@/lib/agents/model";
 import {
   clarificationResultSchema,
   type ClarificationQuestionDraft,
@@ -401,14 +400,14 @@ function fallbackClarification(
   };
 }
 
-async function callDeepClarifier(
+async function callStructuredClarifier(
   objective: string,
   transcript: TranscriptTurn[],
   clarificationRounds: number,
 ) {
-  const model = getConfiguredModel();
+  const clarifier = getConfiguredClarifier();
 
-  if (!model) {
+  if (!clarifier) {
     console.warn("[clarifier] No configured model found; using fallback clarification.", {
       objectiveLength: objective.length,
       clarificationRounds,
@@ -417,61 +416,14 @@ async function callDeepClarifier(
     return fallbackClarification(objective, transcript, clarificationRounds);
   }
 
-  console.info("[clarifier] Starting model-backed clarification.", {
-    clarificationRounds,
-    transcriptTurns: transcript.length,
-    objectivePreview: objective.slice(0, 120),
-  });
-
-  const agent = createDeepAgent({
-    model,
-    responseFormat:
-      clarificationResultSchema as unknown as NonNullable<
-        Parameters<typeof createDeepAgent>[0]
-      >["responseFormat"],
-    systemPrompt: clarifierSystemPrompt,
-    subagents: [
-      {
-        name: "researcher",
-        description: "Investigates context, evidence, and dependencies for business work.",
-        systemPrompt: "Find the facts, assumptions, and gaps that affect execution.",
-      },
-      {
-        name: "operator",
-        description: "Turns an agreed plan into concrete execution steps.",
-        systemPrompt: "Focus on practical delivery and concise operational updates.",
-      },
-      {
-        name: "analyst",
-        description: "Reviews output quality, risks, and success criteria.",
-        systemPrompt: "Evaluate completeness, risks, and whether the objective is satisfied.",
-      },
-    ],
-  });
-
   try {
-    const result = await agent.invoke({
-      messages: [
-        {
-          role: "user",
-          content: buildTranscriptPrompt(objective, transcript),
-        },
-      ],
-    });
-    const structuredResponse = (result as { structuredResponse?: unknown }).structuredResponse;
+    const parsed = clarificationResultSchema.parse(
+      await clarifier.generateClarification({
+        systemPrompt: clarifierSystemPrompt,
+        userPrompt: buildTranscriptPrompt(objective, transcript),
+      }),
+    );
 
-    console.info("[clarifier] Received model response.", {
-      hasStructuredResponse: structuredResponse !== undefined,
-      responseType:
-        structuredResponse === null ? "null" : Array.isArray(structuredResponse) ? "array" : typeof structuredResponse,
-    });
-
-    const parsed = clarificationResultSchema.parse(structuredResponse);
-    console.info("[clarifier] Structured response parsed successfully.", {
-      status: parsed.status,
-      questionCount: parsed.questions.length,
-      executionMode: parsed.executionMode,
-    });
     return {
       ...parsed,
       draftMarkdown:
@@ -503,12 +455,6 @@ async function callDeepClarifier(
       })),
     };
   } catch (error) {
-    console.error("[clarifier] Model-backed clarification failed; using fallback.", {
-      clarificationRounds,
-      transcriptTurns: transcript.length,
-      objectivePreview: objective.slice(0, 120),
-      error,
-    });
     return fallbackClarification(objective, transcript, clarificationRounds);
   }
 }
@@ -754,7 +700,7 @@ export async function clarifyObjective(params: {
   transcript: TranscriptTurn[];
   clarificationRounds?: number;
 }) {
-  const result = await callDeepClarifier(
+  const result = await callStructuredClarifier(
     params.objective,
     params.transcript,
     params.clarificationRounds ?? 0,

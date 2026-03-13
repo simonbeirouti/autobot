@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsRestoring, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import { Clock3Icon, FileTextIcon } from "lucide-react";
 
@@ -42,11 +42,21 @@ import {
   sortDraftsByCreatedAt,
   truncateDraftObjective,
 } from "@/lib/intake/presentation";
+import {
+  createOptimisticFlow,
+  dashboardQueryKeys,
+  dashboardQueryTimings,
+  fetchJson,
+  getDraftsUpdatedAt,
+  upsertDraftInList,
+} from "@/lib/query/dashboard";
+import { useDelayedVisibility } from "@/lib/query/use-delayed-visibility";
 import type { IntakeDraft, IntakeFlowResponse, IntakeQuestion } from "@/lib/intake/types";
 import { cn } from "@/lib/utils";
 
 type DraftWorkspaceMode = "questions" | "review";
 type QuestionResponse = IntakeQuestion["response"];
+const ERROR_VISIBILITY_DELAY_MS = 1000;
 
 function getTimestamp(value: string | null | undefined) {
   if (!value) {
@@ -55,14 +65,6 @@ function getTimestamp(value: string | null | undefined) {
 
   const parsed = new Date(value).getTime();
   return Number.isNaN(parsed) ? Date.now() : parsed;
-}
-
-function getDraftsUpdatedAt(drafts: IntakeDraft[]) {
-  if (drafts.length === 0) {
-    return Date.now();
-  }
-
-  return Math.max(...drafts.map((draft) => getTimestamp(draft.updatedAt)));
 }
 
 function getActiveDrafts(drafts: IntakeDraft[]) {
@@ -88,9 +90,9 @@ function getInitialResponse(question: IntakeQuestion): QuestionResponse {
   }
 
   return {
-    selectedOptionIds: [...question.prefill.selectedOptionIds],
-    otherText: question.prefill.otherText,
-    text: question.prefill.text,
+    selectedOptionIds: [],
+    otherText: "",
+    text: "",
   };
 }
 
@@ -164,19 +166,8 @@ function buildDraftHref(pathname: string, draftId: string) {
   return `${pathname}?${params.toString()}`;
 }
 
-async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
-  const response = await fetch(input, init);
-  const payload = (await response.json()) as T & { error?: string };
-
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Request failed.");
-  }
-
-  return payload as T;
-}
-
 async function fetchDrafts() {
-  return fetchJson<IntakeDraft[]>("/api/intake/drafts", { cache: "no-store" });
+  return fetchJson<IntakeDraft[]>("/api/intake/drafts");
 }
 
 async function fetchDraftFlow(draftId: string) {
@@ -669,14 +660,15 @@ export function DraftsDashboardClient({
   initialFlow,
   initialSelectedDraftId,
 }: {
-  initialDrafts: IntakeDraft[];
-  initialFlow: IntakeFlowResponse | null;
-  initialSelectedDraftId: string | null;
+  initialDrafts?: IntakeDraft[];
+  initialFlow?: IntakeFlowResponse | null;
+  initialSelectedDraftId?: string | null;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+  const isRestoring = useIsRestoring();
   const requestedDraftId = searchParams.get("draftId");
 
   const [answers, setAnswers] = useState<Record<string, QuestionResponse>>({});
@@ -685,23 +677,27 @@ export function DraftsDashboardClient({
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [reviewMarkdown, setReviewMarkdown] = useState("");
   const [isEditingReview, setIsEditingReview] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isExecuting, setIsExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<DraftWorkspaceMode>("questions");
   const previousDraftIdRef = useRef<string | null>(null);
 
   const draftsQuery = useQuery({
-    queryKey: ["drafts"],
+    queryKey: dashboardQueryKeys.drafts.all,
     queryFn: fetchDrafts,
-    initialData: initialDrafts,
-    initialDataUpdatedAt: getDraftsUpdatedAt(initialDrafts),
-    staleTime: 0,
-    refetchOnMount: "always",
+    ...(initialDrafts
+      ? {
+          initialData: initialDrafts,
+          initialDataUpdatedAt: getDraftsUpdatedAt(initialDrafts),
+        }
+      : {}),
+    staleTime: dashboardQueryTimings.drafts.staleTime,
   });
 
   const drafts = getActiveDrafts(draftsQuery.data ?? []);
+  const showDraftsError = useDelayedVisibility(
+    Boolean(draftsQuery.error),
+    ERROR_VISIBILITY_DELAY_MS,
+  );
   const selectedDraftId =
     requestedDraftId && drafts.some((draft) => draft.id === requestedDraftId)
       ? requestedDraftId
@@ -719,7 +715,9 @@ export function DraftsDashboardClient({
   }, [drafts.length, pathname, requestedDraftId, router, selectedDraftId]);
 
   const flowQuery = useQuery({
-    queryKey: ["draft-flow", deferredDraftId],
+    queryKey: deferredDraftId
+      ? dashboardQueryKeys.drafts.flow(deferredDraftId)
+      : dashboardQueryKeys.drafts.flow("pending"),
     queryFn: () => fetchDraftFlow(deferredDraftId!),
     enabled: Boolean(deferredDraftId),
     initialData:
@@ -728,9 +726,9 @@ export function DraftsDashboardClient({
       initialFlow && initialFlow.draft.id === deferredDraftId
         ? getTimestamp(initialFlow.draft.updatedAt)
         : undefined,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: dashboardQueryTimings.draftFlow.staleTime,
   });
+  const showFlowError = useDelayedVisibility(Boolean(flowQuery.error), ERROR_VISIBILITY_DELAY_MS);
 
   useEffect(() => {
     if (!flowQuery.data) {
@@ -766,113 +764,150 @@ export function DraftsDashboardClient({
   }, [flowQuery.data?.draft.runId, flowQuery.data?.draft.status, router]);
 
   function syncFlow(flow: IntakeFlowResponse) {
-    queryClient.setQueryData(["draft-flow", flow.draft.id], flow);
-    queryClient.setQueryData<IntakeDraft[] | undefined>(["drafts"], (currentDrafts) => {
-      if (!currentDrafts) {
-        return [flow.draft];
-      }
-
-      const hasDraft = currentDrafts.some((draft) => draft.id === flow.draft.id);
-      const nextDrafts = hasDraft
-        ? currentDrafts.map((draft) => (draft.id === flow.draft.id ? flow.draft : draft))
-        : [flow.draft, ...currentDrafts];
-
-      return nextDrafts;
-    });
+    queryClient.setQueryData(dashboardQueryKeys.drafts.flow(flow.draft.id), flow);
+    queryClient.setQueryData<IntakeDraft[] | undefined>(
+      dashboardQueryKeys.drafts.all,
+      (currentDrafts) => upsertDraftInList(currentDrafts, flow.draft),
+    );
   }
 
-  async function submitClarificationAnswers() {
-    if (!flowQuery.data) {
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      const flow = await fetchJson<IntakeFlowResponse>("/api/intake/respond", {
+  const submitClarificationAnswers = useMutation({
+    mutationFn: async (flow: IntakeFlowResponse) =>
+      fetchJson<IntakeFlowResponse>("/api/intake/respond", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          draftId: flowQuery.data.draft.id,
+          draftId: flow.draft.id,
           currentStep,
-          answers: flowQuery.data.questions.map((question) => ({
+          answers: flow.questions.map((question) => ({
             questionId: question.id,
             response: answers[question.id] ?? cloneResponse(question.response),
           })),
         }),
-      });
+      }),
+    onMutate: async (flow) => {
+      setError(null);
+      await queryClient.cancelQueries({ queryKey: dashboardQueryKeys.drafts.flow(flow.draft.id) });
 
+      const previousFlow = queryClient.getQueryData<IntakeFlowResponse>(
+        dashboardQueryKeys.drafts.flow(flow.draft.id),
+      );
+
+      syncFlow(
+        createOptimisticFlow(flow, {
+          currentStep,
+          questions: flow.questions.map((question) => ({
+            ...question,
+            response: answers[question.id] ?? cloneResponse(question.response),
+          })),
+        }),
+      );
+
+      return { previousFlow };
+    },
+    onSuccess: (flow) => {
       syncFlow(flow);
       setGeneratedAnswers(normalizeAnswers(flow.questions));
       setMode(flow.draft.status === "review_ready" ? "review" : "questions");
-    } catch (submissionError) {
+    },
+    onError: (submissionError, flow, context) => {
+      if (context?.previousFlow) {
+        syncFlow(context.previousFlow);
+      }
+
       setError(
         submissionError instanceof Error
           ? submissionError.message
           : "Unable to continue clarification.",
       );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+    },
+  });
 
-  async function saveReviewDraft() {
-    if (!flowQuery.data) {
-      return;
-    }
-
-    setIsSaving(true);
-    setError(null);
-
-    try {
-      const flow = await fetchJson<IntakeFlowResponse>(`/api/intake/drafts/${flowQuery.data.draft.id}`, {
+  const saveReviewDraft = useMutation({
+    mutationFn: async (flow: IntakeFlowResponse) =>
+      fetchJson<IntakeFlowResponse>(`/api/intake/drafts/${flow.draft.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           draftMarkdown: reviewMarkdown,
           currentStep,
         }),
-      });
+      }),
+    onMutate: async (flow) => {
+      setError(null);
+      await queryClient.cancelQueries({ queryKey: dashboardQueryKeys.drafts.flow(flow.draft.id) });
 
-      syncFlow(flow);
-      setIsEditingReview(false);
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Unable to save draft.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function startExecution() {
-    if (!flowQuery.data) {
-      return;
-    }
-
-    setIsExecuting(true);
-    setError(null);
-
-    try {
-      const payload = await fetchJson<{ runId: string }>(
-        `/api/intake/drafts/${flowQuery.data.draft.id}/execute`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        },
+      const previousFlow = queryClient.getQueryData<IntakeFlowResponse>(
+        dashboardQueryKeys.drafts.flow(flow.draft.id),
       );
 
-      await queryClient.invalidateQueries({ queryKey: ["drafts"] });
+      syncFlow(
+        createOptimisticFlow(flow, {
+          currentStep,
+          draftMarkdown: reviewMarkdown,
+        }),
+      );
+
+      return { previousFlow };
+    },
+    onSuccess: (flow) => {
+      syncFlow(flow);
+      setIsEditingReview(false);
+    },
+    onError: (saveError, flow, context) => {
+      if (context?.previousFlow) {
+        syncFlow(context.previousFlow);
+      }
+
+      setError(saveError instanceof Error ? saveError.message : "Unable to save draft.");
+    },
+  });
+
+  const startExecution = useMutation({
+    mutationFn: async (flow: IntakeFlowResponse) =>
+      fetchJson<{ runId: string }>(`/api/intake/drafts/${flow.draft.id}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    onMutate: async (flow) => {
+      setError(null);
+      await queryClient.cancelQueries({ queryKey: dashboardQueryKeys.drafts.flow(flow.draft.id) });
+
+      const previousFlow = queryClient.getQueryData<IntakeFlowResponse>(
+        dashboardQueryKeys.drafts.flow(flow.draft.id),
+      );
+
+      syncFlow({
+        ...flow,
+        draft: {
+          ...flow.draft,
+          status: "executing",
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      return { previousFlow };
+    },
+    onSuccess: async (payload, flow) => {
+      queryClient.setQueryData<IntakeDraft[] | undefined>(
+        dashboardQueryKeys.drafts.all,
+        (currentDrafts) => currentDrafts?.filter((draft) => draft.id !== flow.draft.id),
+      );
+      await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.runs.all });
       startTransition(() => {
         router.push(`/dashboard/runs?runId=${payload.runId}`);
       });
-    } catch (executeError) {
+    },
+    onError: (executeError, flow, context) => {
+      if (context?.previousFlow) {
+        syncFlow(context.previousFlow);
+      }
+
       setError(
         executeError instanceof Error ? executeError.message : "Unable to start execution.",
       );
-    } finally {
-      setIsExecuting(false);
-    }
-  }
+    },
+  });
 
   return (
     <WorkspaceSplitLayout
@@ -881,7 +916,7 @@ export function DraftsDashboardClient({
           description="Open an in-progress draft to continue clarification, review the plan, or launch execution."
           title="Drafts"
         >
-          {draftsQuery.error ? (
+          {showDraftsError ? (
             <div className="border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
               {draftsQuery.error instanceof Error
                 ? draftsQuery.error.message
@@ -889,7 +924,7 @@ export function DraftsDashboardClient({
             </div>
           ) : null}
 
-          {!draftsQuery.isLoading && !draftsQuery.error && drafts.length === 0 ? (
+          {!isRestoring && !draftsQuery.isLoading && !showDraftsError && drafts.length === 0 ? (
             <Empty className="border-border">
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -950,7 +985,9 @@ export function DraftsDashboardClient({
         </WorkspaceSidebarPanel>
       }
       content={
-        !selectedDraftId ? (
+        !selectedDraftId && (isRestoring || draftsQuery.isLoading) ? (
+          <DraftWorkspaceSkeleton />
+        ) : !selectedDraftId ? (
           <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
             <CardContent className="flex h-full items-center justify-center py-0">
               <Empty className="max-w-md border-border">
@@ -966,7 +1003,7 @@ export function DraftsDashboardClient({
               </Empty>
             </CardContent>
           </Card>
-        ) : flowQuery.isLoading ? (
+        ) : flowQuery.isLoading || (flowQuery.error && !showFlowError) ? (
           <DraftWorkspaceSkeleton />
         ) : flowQuery.error || !flowQuery.data ? (
           <Card className="min-h-[320px] overflow-hidden xl:h-full xl:min-h-0">
@@ -986,9 +1023,9 @@ export function DraftsDashboardClient({
             flow={flowQuery.data}
             generatedAnswers={generatedAnswers}
             isEditingReview={isEditingReview}
-            isExecuting={isExecuting}
-            isSaving={isSaving}
-            isSubmitting={isSubmitting}
+            isExecuting={startExecution.isPending}
+            isSaving={saveReviewDraft.isPending}
+            isSubmitting={submitClarificationAnswers.isPending}
             mode={mode}
             onAnswerChange={(questionId, value) => {
               setAnswers((currentAnswers) => ({
@@ -1004,14 +1041,20 @@ export function DraftsDashboardClient({
               }
             }}
             onGenerate={() => {
-              void submitClarificationAnswers();
+              if (flowQuery.data) {
+                submitClarificationAnswers.mutate(flowQuery.data);
+              }
             }}
             onReviewMarkdownChange={setReviewMarkdown}
             onSaveDraft={() => {
-              void saveReviewDraft();
+              if (flowQuery.data) {
+                saveReviewDraft.mutate(flowQuery.data);
+              }
             }}
             onStartExecution={() => {
-              void startExecution();
+              if (flowQuery.data) {
+                startExecution.mutate(flowQuery.data);
+              }
             }}
             onToggleMode={setMode}
             onToggleReviewEditing={() => setIsEditingReview((current) => !current)}
