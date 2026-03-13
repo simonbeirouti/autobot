@@ -253,6 +253,7 @@ export async function replaceIntakeQuestions(
   params: {
     draftId: string;
     questions: ClarificationQuestionDraft[];
+    existingQuestions?: IntakeQuestion[];
   },
 ) {
   const { error: deleteError } = await supabase
@@ -271,14 +272,29 @@ export async function replaceIntakeQuestions(
   const { data, error } = await supabase
     .from("intake_questions")
     .insert(
-      params.questions.map((question, index) => ({
-        draft_id: params.draftId,
-        position: index,
-        question: question.question,
-        description: question.description,
-        input_kind: question.inputKind ?? "textarea",
-        is_optional: question.optional ?? false,
-      })),
+      params.questions.map((question, index) => {
+        const preservedQuestion = params.existingQuestions?.find(
+          (existingQuestion) =>
+            existingQuestion.position === index &&
+            existingQuestion.question === question.question &&
+            existingQuestion.description === question.description &&
+            existingQuestion.inputKind === (question.inputKind ?? "textarea") &&
+            existingQuestion.isOptional === (question.optional ?? false),
+        );
+
+        return {
+          draft_id: params.draftId,
+          position: index,
+          question: question.question,
+          description: question.description,
+          input_kind: question.inputKind ?? "textarea",
+          is_optional: question.optional ?? false,
+          answer: preservedQuestion?.answer.trim().length ? preservedQuestion.answer : null,
+          answered_at: preservedQuestion?.answer.trim().length
+            ? preservedQuestion.answeredAt ?? new Date().toISOString()
+            : null,
+        };
+      }),
     )
     .select(
       "id, draft_id, position, question, description, input_kind, is_optional, answer, answered_at, created_at, updated_at",

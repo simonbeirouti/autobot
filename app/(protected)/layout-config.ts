@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   LifeBuoyIcon,
   SendIcon,
+  FileTextIcon,
   Footprints,
   TerminalSquareIcon,
 } from "lucide-react";
@@ -122,6 +123,11 @@ export const protectedNavSecondary: SidebarNavItem[] = [
 
 export const protectedProjects: SidebarProjectItem[] = [
   {
+    name: "Drafts",
+    href: "/dashboard/drafts",
+    icon: FileTextIcon,
+  },
+  {
     name: "Runs",
     href: "/dashboard/runs",
     icon: Footprints,
@@ -130,6 +136,7 @@ export const protectedProjects: SidebarProjectItem[] = [
 
 export const protectedRouteTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
+  "/dashboard/drafts": "Drafts",
   "/dashboard/runs": "Runs",
 };
 

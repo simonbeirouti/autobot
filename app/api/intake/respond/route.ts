@@ -132,6 +132,7 @@ export async function POST(request: Request) {
     const savedQuestions = await replaceIntakeQuestions(supabase, {
       draftId: payload.draftId,
       questions: nextQuestions,
+      existingQuestions: updatedQuestions,
     });
     const savedDraft = await updateIntakeDraft(supabase, {
       draftId: payload.draftId,
