@@ -36,6 +36,8 @@ export type ClarificationMessage = {
 export type RunRecord = {
   id: string;
   sessionId: string;
+  projectId: string | null;
+  objectiveId: string | null;
   objective: string;
   status: RunStatus;
   executionMode: ExecutionMode;

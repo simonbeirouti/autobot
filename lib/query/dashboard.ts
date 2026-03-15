@@ -1,13 +1,19 @@
 import type { IntakeDraft, IntakeFlowResponse } from "@/lib/intake/types";
+import type { Project, ProjectWorkspace } from "@/lib/projects/types";
 import type { RunListItem, WorkspacePayload } from "@/lib/runs/types";
 
 export const dashboardQueryKeys = {
   drafts: {
-    all: ["drafts"] as const,
+    all: (projectId: string) => ["drafts", projectId] as const,
     flow: (draftId: string) => ["draft-flow", draftId] as const,
   },
+  projects: {
+    all: ["projects"] as const,
+    workspace: (projectId: string, threadId?: string | null) =>
+      ["project-workspace", projectId, threadId ?? "latest"] as const,
+  },
   runs: {
-    all: ["runs"] as const,
+    all: (projectId: string) => ["runs", projectId] as const,
     workspace: (runId: string) => ["run-workspace", runId] as const,
   },
 };
@@ -21,6 +27,12 @@ export const dashboardQueryTimings = {
   },
   runs: {
     staleTime: 1000 * 60,
+  },
+  projects: {
+    staleTime: 1000 * 60,
+  },
+  projectWorkspace: {
+    staleTime: 1000 * 15,
   },
   runWorkspace: {
     staleTime: 1000 * 15,
@@ -97,6 +109,39 @@ export function upsertDraftInList(
   return nextDrafts.toSorted(
     (left, right) => getTimestamp(right.updatedAt) - getTimestamp(left.updatedAt),
   );
+}
+
+export function upsertProjectInList(
+  projects: Project[] | undefined,
+  project: Project,
+) {
+  if (!projects) {
+    return [project];
+  }
+
+  const hasProject = projects.some((item) => item.id === project.id);
+  const nextProjects = hasProject
+    ? projects.map((item) => (item.id === project.id ? project : item))
+    : [project, ...projects];
+
+  return nextProjects.toSorted(
+    (left, right) => getTimestamp(right.updatedAt) - getTimestamp(left.updatedAt),
+  );
+}
+
+export function getProjectsUpdatedAt(projects: Project[]) {
+  if (projects.length === 0) {
+    return Date.now();
+  }
+
+  return Math.max(...projects.map((project) => getTimestamp(project.updatedAt)));
+}
+
+export function mergeProjectWorkspace(
+  projects: Project[] | undefined,
+  workspace: ProjectWorkspace,
+) {
+  return upsertProjectInList(projects, workspace.project);
 }
 
 export function createOptimisticFlow(

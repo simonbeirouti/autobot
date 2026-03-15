@@ -8,6 +8,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { Clock3Icon, FileTextIcon } from "lucide-react";
 
 import { MarkdownPreview } from "@/components/markdown-preview";
+import { useProject } from "@/components/providers/project-provider";
 import {
   WorkspaceSidebarPanel,
   WorkspaceSidebarSkeleton,
@@ -166,8 +167,8 @@ function buildDraftHref(pathname: string, draftId: string) {
   return `${pathname}?${params.toString()}`;
 }
 
-async function fetchDrafts() {
-  return fetchJson<IntakeDraft[]>("/api/intake/drafts");
+async function fetchDrafts(projectId: string) {
+  return fetchJson<IntakeDraft[]>(`/api/intake/drafts?projectId=${projectId}`);
 }
 
 async function fetchDraftFlow(draftId: string) {
@@ -669,6 +670,7 @@ export function DraftsDashboardClient({
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const isRestoring = useIsRestoring();
+  const { activeProject, activeProjectId } = useProject();
   const requestedDraftId = searchParams.get("draftId");
 
   const [answers, setAnswers] = useState<Record<string, QuestionResponse>>({});
@@ -682,14 +684,17 @@ export function DraftsDashboardClient({
   const previousDraftIdRef = useRef<string | null>(null);
 
   const draftsQuery = useQuery({
-    queryKey: dashboardQueryKeys.drafts.all,
-    queryFn: fetchDrafts,
-    ...(initialDrafts
+    queryKey: activeProjectId
+      ? dashboardQueryKeys.drafts.all(activeProjectId)
+      : dashboardQueryKeys.drafts.all("pending"),
+    queryFn: () => fetchDrafts(activeProjectId!),
+    ...(initialDrafts && activeProjectId
       ? {
           initialData: initialDrafts,
           initialDataUpdatedAt: getDraftsUpdatedAt(initialDrafts),
         }
       : {}),
+    enabled: Boolean(activeProjectId),
     staleTime: dashboardQueryTimings.drafts.staleTime,
   });
 
@@ -705,6 +710,10 @@ export function DraftsDashboardClient({
   const deferredDraftId = useDeferredValue(selectedDraftId);
 
   useEffect(() => {
+    if (!activeProjectId) {
+      return;
+    }
+
     if (!drafts.length || requestedDraftId === selectedDraftId || !selectedDraftId) {
       return;
     }
@@ -712,7 +721,7 @@ export function DraftsDashboardClient({
     startTransition(() => {
       router.replace(buildDraftHref(pathname, selectedDraftId), { scroll: false });
     });
-  }, [drafts.length, pathname, requestedDraftId, router, selectedDraftId]);
+  }, [activeProjectId, drafts.length, pathname, requestedDraftId, router, selectedDraftId]);
 
   const flowQuery = useQuery({
     queryKey: deferredDraftId
@@ -765,8 +774,11 @@ export function DraftsDashboardClient({
 
   function syncFlow(flow: IntakeFlowResponse) {
     queryClient.setQueryData(dashboardQueryKeys.drafts.flow(flow.draft.id), flow);
+    if (!activeProjectId) {
+      return;
+    }
     queryClient.setQueryData<IntakeDraft[] | undefined>(
-      dashboardQueryKeys.drafts.all,
+      dashboardQueryKeys.drafts.all(activeProjectId),
       (currentDrafts) => upsertDraftInList(currentDrafts, flow.draft),
     );
   }
@@ -890,10 +902,14 @@ export function DraftsDashboardClient({
     },
     onSuccess: async (payload, flow) => {
       queryClient.setQueryData<IntakeDraft[] | undefined>(
-        dashboardQueryKeys.drafts.all,
+        dashboardQueryKeys.drafts.all(activeProjectId ?? "pending"),
         (currentDrafts) => currentDrafts?.filter((draft) => draft.id !== flow.draft.id),
       );
-      await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.runs.all });
+      if (activeProjectId) {
+        await queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.runs.all(activeProjectId),
+        });
+      }
       startTransition(() => {
         router.push(`/dashboard/runs?runId=${payload.runId}`);
       });
@@ -916,6 +932,20 @@ export function DraftsDashboardClient({
           description="Open an in-progress draft to continue clarification, review the plan, or launch execution."
           title="Drafts"
         >
+          {!activeProject ? (
+            <Empty className="border-border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FileTextIcon />
+                </EmptyMedia>
+                <EmptyTitle>Select a project</EmptyTitle>
+                <EmptyDescription>
+                  Choose a project from the switcher before opening project-scoped drafts.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : null}
+
           {showDraftsError ? (
             <div className="border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
               {draftsQuery.error instanceof Error
@@ -924,7 +954,7 @@ export function DraftsDashboardClient({
             </div>
           ) : null}
 
-          {!isRestoring && !draftsQuery.isLoading && !showDraftsError && drafts.length === 0 ? (
+          {activeProject && !isRestoring && !draftsQuery.isLoading && !showDraftsError && drafts.length === 0 ? (
             <Empty className="border-border">
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -932,7 +962,7 @@ export function DraftsDashboardClient({
                 </EmptyMedia>
                 <EmptyTitle>No drafts yet</EmptyTitle>
                 <EmptyDescription>
-                  Start a dashboard intake to create the first draft.
+                  Start a project objective intake to create the first draft for {activeProject.name}.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -985,7 +1015,23 @@ export function DraftsDashboardClient({
         </WorkspaceSidebarPanel>
       }
       content={
-        !selectedDraftId && (isRestoring || draftsQuery.isLoading) ? (
+        !activeProject ? (
+          <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
+            <CardContent className="flex h-full items-center justify-center py-0">
+              <Empty className="max-w-md border-border">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FileTextIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>Select a project</EmptyTitle>
+                  <EmptyDescription>
+                    Choose a project from the switcher to open only that project&apos;s objective drafts.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </CardContent>
+          </Card>
+        ) : !selectedDraftId && (isRestoring || draftsQuery.isLoading) ? (
           <DraftWorkspaceSkeleton />
         ) : !selectedDraftId ? (
           <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">

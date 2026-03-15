@@ -25,17 +25,24 @@ export function WorkspaceSplitLayout({
 export function WorkspaceSidebarPanel({
   title,
   description,
+  headerAction,
   children,
 }: {
   title: string;
   description: string;
+  headerAction?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <Card className="min-h-[320px] mx-0.5 mt-0.5 overflow-hidden xl:h-[calc(100%-0.2rem)]">
       <CardHeader className="shrink-0 border-b">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">{title}</h2>
+            <p className="text-sm text-muted-foreground">{description}</p>
+          </div>
+          {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+        </div>
       </CardHeader>
 
       <CardContent className="min-h-0 flex-1 px-0">

@@ -39,7 +39,13 @@ const draftVisibilityClasses = [
 ] as const;
 const ERROR_VISIBILITY_DELAY_MS = 500;
 
-export function ObjectiveIntake() {
+export function ObjectiveIntake({
+  projectId,
+  projectName,
+}: {
+  projectId: string;
+  projectName: string;
+}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [objective, setObjective] = useState("");
@@ -51,10 +57,11 @@ export function ObjectiveIntake() {
   }, []);
 
   const draftsQuery = useQuery({
-    queryKey: dashboardQueryKeys.drafts.all,
-    queryFn: () => fetchJson<IntakeDraft[]>("/api/intake/drafts"),
+    queryKey: dashboardQueryKeys.drafts.all(projectId),
+    queryFn: () => fetchJson<IntakeDraft[]>(`/api/intake/drafts?projectId=${projectId}`),
     staleTime: dashboardQueryTimings.drafts.staleTime,
     select: (drafts) => sortDraftsByCreatedAt(drafts.filter(isActiveIntakeDraft)),
+    enabled: Boolean(projectId),
   });
   const showDraftsError = useDelayedVisibility(
     Boolean(draftsQuery.error) && hasHydrated,
@@ -66,14 +73,14 @@ export function ObjectiveIntake() {
       fetchJson<IntakeFlowResponse>("/api/intake/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ objective: nextObjective }),
+        body: JSON.stringify({ projectId, objective: nextObjective }),
       }),
     onMutate: () => {
       setError(null);
     },
     onSuccess: (flow) => {
       queryClient.setQueryData<IntakeDraft[] | undefined>(
-        dashboardQueryKeys.drafts.all,
+        dashboardQueryKeys.drafts.all(projectId),
         (currentDrafts) => upsertDraftInList(currentDrafts, flow.draft),
       );
       queryClient.setQueryData(dashboardQueryKeys.drafts.flow(flow.draft.id), flow);
@@ -105,11 +112,11 @@ export function ObjectiveIntake() {
         <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-6 text-center">
           <div className="space-y-3">
             <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-              Describe the objective you want AutoBot to own
+              Define the next objective for {projectName}
             </h1>
             <p className="text-sm leading-6 text-muted-foreground sm:text-base">
-              Start with the business outcome. AutoBot will ask follow-up questions,
-              assemble a draft plan, and wait for your review before execution begins.
+              Start with the business outcome for this project. AutoBot will ask follow-up questions,
+              assemble a draft plan, and keep everything scoped to {projectName}.
             </p>
           </div>
 
@@ -118,7 +125,7 @@ export function ObjectiveIntake() {
               <Input
                 className="h-12 text-sm sm:text-base"
                 onChange={(event) => setObjective(event.target.value)}
-                placeholder="Describe the business objective you want the agent system to own..."
+                placeholder={`Describe the next objective for ${projectName}...`}
                 value={objective}
               />
               <Button className="h-12 px-6" disabled={!canStart} onClick={submitObjective}>

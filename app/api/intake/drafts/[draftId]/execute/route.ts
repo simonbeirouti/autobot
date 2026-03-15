@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { buildInitialRunPayload } from "@/lib/agents/orchestrator";
+import { writeLongTermMemory } from "@/lib/memory/repository";
+import { resolveCompanyKey } from "@/lib/projects/context";
+import { createObjective, updateObjective } from "@/lib/projects/repository";
 import { fetchIntakeDraftWithQuestions, updateIntakeDraft } from "@/lib/intake/repository";
 import {
   appendClarificationMessage,
@@ -64,14 +67,46 @@ export async function POST(
     if (!draft.executionMode) {
       return NextResponse.json({ error: "Draft is missing an execution mode." }, { status: 409 });
     }
+    if (!draft.projectId) {
+      return NextResponse.json({ error: "Draft is missing a project." }, { status: 409 });
+    }
 
     const run = await createRun(supabase, {
       sessionId: draft.sessionId,
       userId: user.sub,
+      projectId: draft.projectId,
+      objectiveId: draft.objectiveId,
       objective: draft.objective,
       executionMode: draft.executionMode,
       readinessSummary: draft.clarificationSummary ?? "Draft approved for execution.",
     });
+
+    const companyKey = resolveCompanyKey({
+      sub: user.sub,
+      email: typeof user.email === "string" ? user.email : null,
+    });
+    const objective = draft.objectiveId
+      ? await updateObjective(supabase, {
+          objectiveId: draft.objectiveId,
+          projectId: draft.projectId,
+          userId: user.sub,
+          patch: {
+            title: draft.objective,
+            description: draft.clarificationSummary ?? "",
+            sourceRunId: run.id,
+            sourceDraftId: draft.id,
+            status: "active",
+          },
+        })
+      : await createObjective(supabase, {
+          projectId: draft.projectId,
+          userId: user.sub,
+          title: draft.objective,
+          description: draft.clarificationSummary ?? "",
+          sourceRunId: run.id,
+          sourceDraftId: draft.id,
+          status: "active",
+        });
 
     const initialPayload = buildInitialRunPayload({
       runId: run.id,
@@ -120,7 +155,28 @@ export async function POST(
       patch: {
         status: "archived",
         runId: run.id,
+        projectId: draft.projectId,
+        objectiveId: objective.id,
         completedAt: new Date().toISOString(),
+      },
+    });
+
+    await writeLongTermMemory(supabase, {
+      userId: user.sub,
+      companyKey,
+      projectId: draft.projectId,
+      objectiveId: objective.id,
+      scope: "objective",
+      kind: "objective",
+      sourceType: "draft_execution",
+      sourceId: draft.id,
+      summary: draft.clarificationSummary ?? `Execution objective for ${objective.title}`,
+      content: draft.draftMarkdown ?? draft.generatedMarkdown ?? draft.objective,
+      metadata: {
+        draftId: draft.id,
+        runId: run.id,
+        projectId: draft.projectId,
+        objectiveId: objective.id,
       },
     });
 

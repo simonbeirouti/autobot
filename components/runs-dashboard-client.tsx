@@ -12,6 +12,7 @@ import {
   RunWorkspaceSkeleton,
   RunWorkspaceView,
 } from "@/components/run-workspace";
+import { useProject } from "@/components/providers/project-provider";
 import {
   WorkspaceSidebarPanel,
   WorkspaceSidebarSkeleton,
@@ -54,8 +55,8 @@ function getTimestamp(value: string | null | undefined) {
   return Number.isNaN(parsed) ? Date.now() : parsed;
 }
 
-async function fetchRuns() {
-  return fetchJson<RunListItem[]>("/api/runs");
+async function fetchRuns(projectId: string) {
+  return fetchJson<RunListItem[]>(`/api/runs?projectId=${projectId}`);
 }
 
 function truncateRunTitle(objective: string) {
@@ -103,17 +104,21 @@ export function RunsDashboardClient({
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const isRestoring = useIsRestoring();
+  const { activeProject, activeProjectId } = useProject();
   const requestedRunId = searchParams.get("runId");
 
   const runsQuery = useQuery({
-    queryKey: dashboardQueryKeys.runs.all,
-    queryFn: fetchRuns,
-    ...(initialRuns
+    queryKey: activeProjectId
+      ? dashboardQueryKeys.runs.all(activeProjectId)
+      : dashboardQueryKeys.runs.all("pending"),
+    queryFn: () => fetchRuns(activeProjectId!),
+    ...(initialRuns && activeProjectId
       ? {
           initialData: initialRuns,
           initialDataUpdatedAt: getRunsUpdatedAt(initialRuns),
         }
       : {}),
+    enabled: Boolean(activeProjectId),
     staleTime: dashboardQueryTimings.runs.staleTime,
   });
 
@@ -126,6 +131,10 @@ export function RunsDashboardClient({
   const deferredRunId = useDeferredValue(selectedRunId);
 
   useEffect(() => {
+    if (!activeProjectId) {
+      return;
+    }
+
     if (!runs.length || requestedRunId === selectedRunId || !selectedRunId) {
       return;
     }
@@ -133,7 +142,7 @@ export function RunsDashboardClient({
     startTransition(() => {
       router.replace(buildRunHref(pathname, selectedRunId), { scroll: false });
     });
-  }, [pathname, requestedRunId, router, runs.length, selectedRunId]);
+  }, [activeProjectId, pathname, requestedRunId, router, runs.length, selectedRunId]);
 
   const workspaceQuery = useQuery({
     queryKey: deferredRunId
@@ -154,9 +163,12 @@ export function RunsDashboardClient({
     mutationFn: () => advanceWorkspace(selectedRunId!),
     onSuccess: (workspace) => {
       queryClient.setQueryData(dashboardQueryKeys.runs.workspace(workspace.run.id), workspace);
-      queryClient.setQueryData<RunListItem[] | undefined>(dashboardQueryKeys.runs.all, (currentRuns) =>
-        mergeRunIntoList(currentRuns, workspace),
-      );
+      if (activeProjectId) {
+        queryClient.setQueryData<RunListItem[] | undefined>(
+          dashboardQueryKeys.runs.all(activeProjectId),
+          (currentRuns) => mergeRunIntoList(currentRuns, workspace),
+        );
+      }
     },
   });
 
@@ -193,13 +205,27 @@ export function RunsDashboardClient({
           description="Recent and in-flight runs stay cached locally so this workspace reopens quickly."
           title="Execution history"
         >
+          {!activeProject ? (
+            <Empty className="border-border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FootprintsIcon />
+                </EmptyMedia>
+                <EmptyTitle>Select a project</EmptyTitle>
+                <EmptyDescription>
+                  Choose a project from the switcher before opening project-scoped runs.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : null}
+
           {showRunsError ? (
             <div className="border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
               {runsQuery.error instanceof Error ? runsQuery.error.message : "Unable to load runs."}
             </div>
           ) : null}
 
-          {!isRestoring && !runsQuery.isLoading && !showRunsError && runs.length === 0 ? (
+          {activeProject && !isRestoring && !runsQuery.isLoading && !showRunsError && runs.length === 0 ? (
             <Empty className="border-border">
               <EmptyHeader>
                 <EmptyMedia variant="icon">
@@ -207,7 +233,7 @@ export function RunsDashboardClient({
                 </EmptyMedia>
                 <EmptyTitle>No runs yet</EmptyTitle>
                 <EmptyDescription>
-                  Start a dashboard objective to create the first run.
+                  Start an objective for {activeProject.name} to create the first run.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -263,7 +289,23 @@ export function RunsDashboardClient({
         </WorkspaceSidebarPanel>
       }
       content={
-        !selectedRunId && (isRestoring || runsQuery.isLoading) ? (
+        !activeProject ? (
+          <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
+            <CardContent className="flex h-full items-center justify-center py-0">
+              <Empty className="max-w-md border-border">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FootprintsIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>Select a project</EmptyTitle>
+                  <EmptyDescription>
+                    Choose a project from the switcher to inspect only that project&apos;s runs.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </CardContent>
+          </Card>
+        ) : !selectedRunId && (isRestoring || runsQuery.isLoading) ? (
           <RunWorkspaceSkeleton />
         ) : !selectedRunId ? (
           <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">

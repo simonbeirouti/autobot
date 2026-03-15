@@ -18,6 +18,8 @@ type IntakeDraftRow = {
   id: string;
   session_id: string;
   run_id: string | null;
+  project_id: string | null;
+  objective_id: string | null;
   objective: string;
   status: IntakeDraftStatus;
   current_step: number;
@@ -69,6 +71,8 @@ function mapDraft(row: IntakeDraftRow): IntakeDraft {
     id: row.id,
     sessionId: row.session_id,
     runId: row.run_id,
+    projectId: row.project_id,
+    objectiveId: row.objective_id,
     objective: row.objective,
     status: row.status,
     currentStep: row.current_step,
@@ -127,6 +131,7 @@ export async function createIntakeDraft(
   params: {
     sessionId: string;
     userId: string;
+    projectId: string;
     objective: string;
   },
 ) {
@@ -135,10 +140,11 @@ export async function createIntakeDraft(
     .insert({
       session_id: params.sessionId,
       user_id: params.userId,
+      project_id: params.projectId,
       objective: params.objective,
     })
     .select(
-      "id, session_id, run_id, objective, status, current_step, question_count, clarification_summary, execution_mode, confidence_to_proceed, generated_markdown, draft_markdown, task_drafts, event_narrative, last_generated_at, last_edited_at, completed_at, created_at, updated_at",
+      "id, session_id, run_id, project_id, objective_id, objective, status, current_step, question_count, clarification_summary, execution_mode, confidence_to_proceed, generated_markdown, draft_markdown, task_drafts, event_narrative, last_generated_at, last_edited_at, completed_at, created_at, updated_at",
     )
     .single();
 
@@ -158,6 +164,8 @@ export async function updateIntakeDraft(
       status?: IntakeDraftStatus;
       currentStep?: number;
       runId?: string | null;
+      projectId?: string | null;
+      objectiveId?: string | null;
       questionCount?: number;
       clarificationSummary?: string | null;
       executionMode?: ExecutionMode | null;
@@ -177,6 +185,8 @@ export async function updateIntakeDraft(
   if (params.patch.status !== undefined) patch.status = params.patch.status;
   if (params.patch.currentStep !== undefined) patch.current_step = params.patch.currentStep;
   if (params.patch.runId !== undefined) patch.run_id = params.patch.runId;
+  if (params.patch.projectId !== undefined) patch.project_id = params.patch.projectId;
+  if (params.patch.objectiveId !== undefined) patch.objective_id = params.patch.objectiveId;
   if (params.patch.questionCount !== undefined) patch.question_count = params.patch.questionCount;
   if (params.patch.clarificationSummary !== undefined) {
     patch.clarification_summary = params.patch.clarificationSummary;
@@ -201,7 +211,7 @@ export async function updateIntakeDraft(
     .eq("id", params.draftId)
     .eq("user_id", params.userId)
     .select(
-      "id, session_id, run_id, objective, status, current_step, question_count, clarification_summary, execution_mode, confidence_to_proceed, generated_markdown, draft_markdown, task_drafts, event_narrative, last_generated_at, last_edited_at, completed_at, created_at, updated_at",
+      "id, session_id, run_id, project_id, objective_id, objective, status, current_step, question_count, clarification_summary, execution_mode, confidence_to_proceed, generated_markdown, draft_markdown, task_drafts, event_narrative, last_generated_at, last_edited_at, completed_at, created_at, updated_at",
     )
     .single();
 
@@ -219,7 +229,7 @@ export async function fetchIntakeDraft(
   const { data, error } = await supabase
     .from("intake_drafts")
     .select(
-      "id, session_id, run_id, objective, status, current_step, question_count, clarification_summary, execution_mode, confidence_to_proceed, generated_markdown, draft_markdown, task_drafts, event_narrative, last_generated_at, last_edited_at, completed_at, created_at, updated_at",
+      "id, session_id, run_id, project_id, objective_id, objective, status, current_step, question_count, clarification_summary, execution_mode, confidence_to_proceed, generated_markdown, draft_markdown, task_drafts, event_narrative, last_generated_at, last_edited_at, completed_at, created_at, updated_at",
     )
     .eq("id", params.draftId)
     .eq("user_id", params.userId)
@@ -234,15 +244,21 @@ export async function fetchIntakeDraft(
 
 export async function fetchIntakeDrafts(
   supabase: SupabaseClient,
-  params: { userId: string },
+  params: { userId: string; projectId?: string | null },
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from("intake_drafts")
     .select(
-      "id, session_id, run_id, objective, status, current_step, question_count, clarification_summary, execution_mode, confidence_to_proceed, generated_markdown, draft_markdown, task_drafts, event_narrative, last_generated_at, last_edited_at, completed_at, created_at, updated_at",
+      "id, session_id, run_id, project_id, objective_id, objective, status, current_step, question_count, clarification_summary, execution_mode, confidence_to_proceed, generated_markdown, draft_markdown, task_drafts, event_narrative, last_generated_at, last_edited_at, completed_at, created_at, updated_at",
     )
     .eq("user_id", params.userId)
     .order("updated_at", { ascending: false });
+
+  if (params.projectId) {
+    query = query.eq("project_id", params.projectId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;

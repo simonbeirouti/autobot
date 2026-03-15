@@ -1,6 +1,6 @@
 "use client";
 
-import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
+import type { AuthChangeEvent, AuthError, Session, User } from "@supabase/supabase-js";
 import {
   createContext,
   useContext,
@@ -160,13 +160,17 @@ export function AuthProvider({
     const supabase = createClient();
     let isMounted = true;
 
-    void supabase.auth.getSession().then(({ data, error }) => {
-      if (!isMounted || error || hasResolvedInitialSessionRef.current) {
-        return;
-      }
+    void supabase.auth
+      .getSession()
+      .then(
+        ({ data, error }: { data: { session: Session | null }; error: AuthError | null }) => {
+          if (!isMounted || error || hasResolvedInitialSessionRef.current) {
+            return;
+          }
 
-      void handleAuthStateChange("INITIAL_SESSION", data.session);
-    });
+          void handleAuthStateChange("INITIAL_SESSION", data.session);
+        },
+      );
 
     const {
       data: { subscription },

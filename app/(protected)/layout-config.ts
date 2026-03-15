@@ -4,6 +4,7 @@ import {
   SendIcon,
   FileTextIcon,
   Footprints,
+  FolderKanbanIcon,
   TerminalSquareIcon,
 } from "lucide-react";
 
@@ -128,6 +129,11 @@ export const protectedProjects: SidebarProjectItem[] = [
     icon: FileTextIcon,
   },
   {
+    name: "Projects",
+    href: "/dashboard/projects",
+    icon: FolderKanbanIcon,
+  },
+  {
     name: "Runs",
     href: "/dashboard/runs",
     icon: Footprints,
@@ -137,6 +143,7 @@ export const protectedProjects: SidebarProjectItem[] = [
 export const protectedRouteTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/dashboard/drafts": "Drafts",
+  "/dashboard/projects": "Projects",
   "/dashboard/runs": "Runs",
 };
 

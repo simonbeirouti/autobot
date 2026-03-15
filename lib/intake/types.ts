@@ -47,6 +47,8 @@ export type IntakeDraft = {
   id: string;
   sessionId: string;
   runId: string | null;
+  projectId: string | null;
+  objectiveId: string | null;
   objective: string;
   status: IntakeDraftStatus;
   currentStep: number;

@@ -17,6 +17,7 @@ import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
+  projectId: z.string().uuid(),
   objective: z.string().min(8).max(2000),
 });
 
@@ -48,6 +49,7 @@ export async function POST(request: Request) {
     const draft = await createIntakeDraft(supabase, {
       sessionId,
       userId: user.sub,
+      projectId: payload.projectId,
       objective: payload.objective,
     });
 

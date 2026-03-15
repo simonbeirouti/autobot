@@ -454,7 +454,7 @@ async function callStructuredClarifier(
         },
       })),
     };
-  } catch (error) {
+  } catch {
     return fallbackClarification(objective, transcript, clarificationRounds);
   }
 }

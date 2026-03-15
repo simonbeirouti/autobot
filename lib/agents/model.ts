@@ -1,4 +1,5 @@
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
+import type { z } from "zod";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 
@@ -18,6 +19,18 @@ export type ConfiguredClarifier = {
   provider: ClarifierProvider;
   modelName: string;
   generateClarification: (request: ClarificationRequest) => Promise<ClarificationResult>;
+};
+
+export type ConfiguredChatModel = {
+  provider: ClarifierProvider;
+  modelName: string;
+  invoke: (messages: BaseMessage[]) => Promise<{ content: BaseMessage["content"] }>;
+  withStructuredOutput: <TSchema extends z.ZodTypeAny>(
+    schema: TSchema,
+    options?: { name?: string; strict?: boolean; method?: "jsonSchema" },
+  ) => {
+    invoke: (messages: BaseMessage[]) => Promise<z.infer<TSchema>>;
+  };
 };
 
 function readEnv(...keys: string[]) {
@@ -84,6 +97,41 @@ function createOpenAiClarifier(): ConfiguredClarifier | null {
   };
 }
 
+function createOpenAiChatModel(): ConfiguredChatModel | null {
+  const apiKey = readEnv(
+    "OPENAI_API_KEY",
+    "openai_api_key",
+    "NEXT_PRIVATE_OPENAI_API_KEY",
+  );
+
+  if (!apiKey) {
+    return null;
+  }
+
+  const modelName = readEnv("OPENAI_MODEL", "openai_model") ?? "gpt-4.1-mini";
+  const model = new ChatOpenAI({
+    apiKey,
+    model: modelName,
+    temperature: 0.2,
+  });
+
+  return {
+    provider: "openai",
+    modelName,
+    invoke: (messages) => model.invoke(messages),
+    withStructuredOutput(schema, options) {
+      const structured = model.withStructuredOutput(schema, {
+        name: options?.name ?? "structured_output",
+        strict: options?.strict ?? true,
+      });
+
+      return {
+        invoke: async (messages) => schema.parse(await structured.invoke(messages)),
+      };
+    },
+  };
+}
+
 function createAnthropicClarifier(): ConfiguredClarifier | null {
   const apiKey = readEnv("ANTHROPIC_API_KEY", "anthropic_api_key");
 
@@ -116,6 +164,38 @@ function createAnthropicClarifier(): ConfiguredClarifier | null {
   };
 }
 
+function createAnthropicChatModel(): ConfiguredChatModel | null {
+  const apiKey = readEnv("ANTHROPIC_API_KEY", "anthropic_api_key");
+
+  if (!apiKey) {
+    return null;
+  }
+
+  const modelName =
+    readEnv("ANTHROPIC_MODEL", "anthropic_model") ?? "claude-sonnet-4-5";
+  const model = new ChatAnthropic({
+    apiKey,
+    model: modelName,
+    temperature: 0.2,
+  });
+
+  return {
+    provider: "anthropic",
+    modelName,
+    invoke: (messages) => model.invoke(messages),
+    withStructuredOutput(schema, options) {
+      const structured = model.withStructuredOutput(schema, {
+        name: options?.name ?? "structured_output",
+        method: options?.method ?? "jsonSchema",
+      });
+
+      return {
+        invoke: async (messages) => schema.parse(await structured.invoke(messages)),
+      };
+    },
+  };
+}
+
 export function getConfiguredClarifier(): ConfiguredClarifier | null {
   const provider = readConfiguredProvider();
 
@@ -128,4 +208,18 @@ export function getConfiguredClarifier(): ConfiguredClarifier | null {
   }
 
   return createAnthropicClarifier();
+}
+
+export function getConfiguredChatModel(): ConfiguredChatModel | null {
+  const provider = readConfiguredProvider();
+
+  if (!provider) {
+    return null;
+  }
+
+  if (provider === "openai") {
+    return createOpenAiChatModel();
+  }
+
+  return createAnthropicChatModel();
 }

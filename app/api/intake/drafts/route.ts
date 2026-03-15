@@ -4,7 +4,7 @@ import { fetchIntakeDrafts } from "@/lib/intake/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
     if (!user?.sub) {
@@ -12,7 +12,11 @@ export async function GET() {
     }
 
     const supabase = await createClient();
-    const drafts = await fetchIntakeDrafts(supabase, { userId: user.sub });
+    const projectId = new URL(request.url).searchParams.get("projectId");
+    const drafts = await fetchIntakeDrafts(supabase, {
+      userId: user.sub,
+      projectId,
+    });
 
     return NextResponse.json(drafts, {
       headers: {
