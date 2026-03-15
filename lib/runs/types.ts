@@ -36,6 +36,8 @@ export type ClarificationMessage = {
 export type RunRecord = {
   id: string;
   sessionId: string;
+  projectId: string | null;
+  objectiveId: string | null;
   objective: string;
   status: RunStatus;
   executionMode: ExecutionMode;
@@ -44,6 +46,8 @@ export type RunRecord = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type RunListItem = RunRecord;
 
 export type RunTask = {
   id: string;
@@ -102,4 +106,3 @@ export type WorkspacePayload = {
   events: RunEvent[];
   usage: UsageRecord[];
 };
-

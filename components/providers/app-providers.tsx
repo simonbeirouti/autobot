@@ -1,6 +1,7 @@
 "use client";
 
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { ProjectProvider } from "@/components/providers/project-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 
 export function AppProviders({
@@ -11,7 +12,7 @@ export function AppProviders({
   return (
     <AuthProvider>
       <QueryProvider>
-        {children}
+        <ProjectProvider>{children}</ProjectProvider>
       </QueryProvider>
     </AuthProvider>
   );

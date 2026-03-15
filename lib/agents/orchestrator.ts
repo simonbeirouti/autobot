@@ -1,9 +1,9 @@
-import { createDeepAgent } from "deepagents";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 
-import { getConfiguredModel } from "@/lib/agents/model";
+import { getConfiguredClarifier } from "@/lib/agents/model";
 import {
   clarificationResultSchema,
+  type ClarificationQuestionDraft,
   type ClarificationResult,
   type ClarificationTaskDraft,
 } from "@/lib/agents/schemas";
@@ -48,23 +48,14 @@ Your job:
 
 Rules:
 - Return operational summaries only. Never reveal hidden chain-of-thought.
-- Ask at most 3 clarification questions.
+- Ask only for information that is still missing.
+- Prefer structured options over open-ended text when a small set of likely answers exists.
 - Keep questions concrete and decision-oriented.
+- Use stable question ids that can survive follow-up rounds when the question meaning is unchanged.
+- Limit each response to at most 8 clarification questions.
 - Only mark ready_to_execute when a useful first execution plan is possible.
 - Use one of these agent ids for tasks: orchestrator, researcher, operator, analyst.
 `;
-
-const ClarificationGraphState = Annotation.Root({
-  objective: Annotation<string>(),
-  transcript: Annotation<TranscriptTurn[]>({
-    reducer: (_current, update) => update,
-    default: () => [],
-  }),
-  result: Annotation<ClarificationResult | null>({
-    reducer: (_current, update) => update,
-    default: () => null,
-  }),
-});
 
 const ExecutionGraphState = Annotation.Root({
   runId: Annotation<string>(),
@@ -126,7 +117,121 @@ function countStructuredAnswers(content: string) {
   ).filter((match) => match[1]?.trim().length > 0).length;
 }
 
-function fallbackClarification(objective: string, transcript: TranscriptTurn[]): ClarificationResult {
+function slugifyQuestionId(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 48) || "question"
+  );
+}
+
+function createSelectQuestion(params: {
+  id: string;
+  prompt: string;
+  helpText: string;
+  options: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    isRecommended?: boolean;
+  }>;
+  allowOther?: boolean;
+  optional?: boolean;
+  recommendedOptionIds?: string[];
+  otherLabel?: string;
+  otherPlaceholder?: string;
+}): ClarificationQuestionDraft {
+  return {
+    id: slugifyQuestionId(params.id),
+    prompt: params.prompt,
+    helpText: params.helpText,
+    inputKind: "single_select",
+    options: params.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      description: option.description ?? "",
+      isRecommended: option.isRecommended ?? false,
+    })),
+    allowOther: params.allowOther ?? false,
+    optional: params.optional ?? false,
+    otherLabel: params.otherLabel ?? "Other",
+    otherPlaceholder: params.otherPlaceholder ?? "Add a different answer",
+    prefill: {
+      selectedOptionIds: params.recommendedOptionIds ?? [],
+      otherText: "",
+      text: "",
+    },
+  };
+}
+
+function createTextQuestion(params: {
+  id: string;
+  prompt: string;
+  helpText: string;
+  optional?: boolean;
+  placeholder?: string;
+}): ClarificationQuestionDraft {
+  return {
+    id: slugifyQuestionId(params.id),
+    prompt: params.prompt,
+    helpText: params.helpText,
+    inputKind: "text",
+    options: [],
+    allowOther: false,
+    optional: params.optional ?? false,
+    otherLabel: "Other",
+    otherPlaceholder: params.placeholder ?? "Add the missing context",
+    prefill: {
+      selectedOptionIds: [],
+      otherText: "",
+      text: "",
+    },
+  };
+}
+
+function buildDraftMarkdown(params: {
+  objective: string;
+  summary: string;
+  executionMode: ExecutionMode;
+  tasks: ClarificationTaskDraft[];
+  eventNarrative: string[];
+}) {
+  const taskLines = params.tasks
+    .map((task, index) => {
+      const agentId = normalizeAgentId(task.agentId);
+      return `${index + 1}. **${task.title}** (${AGENT_STYLES[agentId].label})${task.description ? `\n   - ${task.description}` : ""}`;
+    })
+    .join("\n");
+
+  const narrativeLines = params.eventNarrative.map((item) => `- ${item}`).join("\n");
+
+  return [
+    "# Plan of action",
+    "",
+    "## Objective",
+    params.objective,
+    "",
+    "## Intake summary",
+    params.summary,
+    "",
+    "## Execution mode",
+    params.executionMode === "multi_agent" ? "Multi-agent" : "Single-agent",
+    "",
+    "## Initial tasks",
+    taskLines || "- No tasks generated yet.",
+    "",
+    "## Notes",
+    narrativeLines || "- No additional notes.",
+  ].join("\n");
+}
+
+function fallbackClarification(
+  objective: string,
+  transcript: TranscriptTurn[],
+  clarificationRounds = 0,
+): ClarificationResult {
   const userTurns = transcript.filter((turn) => turn.role === "user");
   const objectiveLower = objective.toLowerCase();
   const isBroadObjective =
@@ -136,18 +241,78 @@ function fallbackClarification(objective: string, transcript: TranscriptTurn[]):
   const hasStructuredAnswers = countStructuredAnswers(latestUserTurn) >= 2;
   const hasEnoughAnswers =
     userTurns.length >= 3 || transcript.length >= 4 || hasStructuredAnswers;
+  const hasHitRoundLimit = clarificationRounds >= 3;
 
-  if (!hasEnoughAnswers) {
+  if (!hasEnoughAnswers && !hasHitRoundLimit) {
     return {
       status: "needs_input",
       summary: "The objective is promising, but the agent still needs a few constraints before execution.",
       confidenceToProceed: 0.42,
       executionMode: isBroadObjective ? "multi_agent" : "single_agent",
       questions: [
-        "What specific outcome would make this objective a success?",
-        "Who is the primary audience or customer for this work?",
-        "What deadline or operating constraint should the agent respect?",
+        createTextQuestion({
+          id: "success_outcome",
+          prompt: "What specific outcome would make this objective a success?",
+          helpText:
+            "The agent needs a clear definition of success so it can optimize the plan around a concrete result.",
+        }),
+        createSelectQuestion({
+          id: "primary_audience",
+          prompt: "Who is the primary audience or customer for this work?",
+          helpText:
+            "The intended audience changes the scope, tone, and execution priorities.",
+          options: [
+            {
+              id: "existing_customers",
+              label: "Existing customers",
+              description: "Optimize for current users and retention or expansion work.",
+            },
+            {
+              id: "new_prospects",
+              label: "New prospects",
+              description: "Optimize for acquisition and first-touch clarity.",
+              isRecommended: true,
+            },
+            {
+              id: "internal_team",
+              label: "Internal team",
+              description: "Optimize for internal stakeholders or operations.",
+            },
+          ],
+          allowOther: true,
+          recommendedOptionIds: ["new_prospects"],
+        }),
+        createSelectQuestion({
+          id: "time_constraint",
+          prompt: "What timeline should AutoBot optimize for?",
+          helpText:
+            "Time and delivery pressure affect how ambitious the first plan should be.",
+          options: [
+            {
+              id: "asap",
+              label: "As soon as possible",
+              description: "Bias toward immediate progress and a smaller first delivery slice.",
+              isRecommended: true,
+            },
+            {
+              id: "this_week",
+              label: "Within this week",
+              description: "Balance speed with a more complete first plan.",
+            },
+            {
+              id: "no_fixed_deadline",
+              label: "No fixed deadline",
+              description: "Optimize for completeness over speed.",
+            },
+          ],
+          allowOther: true,
+          optional: true,
+          recommendedOptionIds: ["asap"],
+          otherLabel: "Different deadline",
+          otherPlaceholder: "Add a date, milestone, or operating constraint",
+        }),
       ],
+      draftMarkdown: "",
       tasks: [],
       eventNarrative: [
         "Intake review started.",
@@ -199,83 +364,100 @@ function fallbackClarification(objective: string, transcript: TranscriptTurn[]):
           },
         ];
 
+  const summary =
+    executionMode === "multi_agent"
+      ? hasHitRoundLimit
+        ? "The objective is broad, and AutoBot is proceeding with explicit assumptions after reaching the clarification limit."
+        : "The objective is actionable and broad enough to justify specialist delegation."
+      : hasHitRoundLimit
+        ? "The objective is actionable enough to proceed, and AutoBot is filling the remaining gaps with explicit assumptions."
+        : "The objective is actionable and compact enough for a focused single-agent run.";
+  const eventNarrative = [
+    "Clarification is complete.",
+    ...(hasHitRoundLimit
+      ? ["AutoBot reached the clarification round limit and proceeded using explicit working assumptions."]
+      : []),
+    executionMode === "multi_agent"
+      ? "The orchestrator selected a delegated execution path."
+      : "The orchestrator selected a focused single-agent path.",
+  ];
+
   return {
     status: "ready_to_execute",
-    summary:
-      executionMode === "multi_agent"
-        ? "The objective is actionable and broad enough to justify specialist delegation."
-        : "The objective is actionable and compact enough for a focused single-agent run.",
+    summary,
     confidenceToProceed: 0.82,
     executionMode,
     questions: [],
+    draftMarkdown: buildDraftMarkdown({
+      objective,
+      summary,
+      executionMode,
+      tasks,
+      eventNarrative,
+    }),
     tasks,
-    eventNarrative: [
-      "Clarification is complete.",
-      executionMode === "multi_agent"
-        ? "The orchestrator selected a delegated execution path."
-        : "The orchestrator selected a focused single-agent path.",
-    ],
+    eventNarrative,
   };
 }
 
-async function callDeepClarifier(objective: string, transcript: TranscriptTurn[]) {
-  const model = getConfiguredModel();
+async function callStructuredClarifier(
+  objective: string,
+  transcript: TranscriptTurn[],
+  clarificationRounds: number,
+) {
+  const clarifier = getConfiguredClarifier();
 
-  if (!model) {
-    return fallbackClarification(objective, transcript);
+  if (!clarifier) {
+    console.warn("[clarifier] No configured model found; using fallback clarification.", {
+      objectiveLength: objective.length,
+      clarificationRounds,
+      transcriptTurns: transcript.length,
+    });
+    return fallbackClarification(objective, transcript, clarificationRounds);
   }
-
-  const agent = createDeepAgent({
-    model,
-    responseFormat:
-      clarificationResultSchema as unknown as NonNullable<
-        Parameters<typeof createDeepAgent>[0]
-      >["responseFormat"],
-    systemPrompt: clarifierSystemPrompt,
-    subagents: [
-      {
-        name: "researcher",
-        description: "Investigates context, evidence, and dependencies for business work.",
-        systemPrompt: "Find the facts, assumptions, and gaps that affect execution.",
-      },
-      {
-        name: "operator",
-        description: "Turns an agreed plan into concrete execution steps.",
-        systemPrompt: "Focus on practical delivery and concise operational updates.",
-      },
-      {
-        name: "analyst",
-        description: "Reviews output quality, risks, and success criteria.",
-        systemPrompt: "Evaluate completeness, risks, and whether the objective is satisfied.",
-      },
-    ],
-  });
 
   try {
-    const result = await agent.invoke({
-      messages: [
-        {
-          role: "user",
-          content: buildTranscriptPrompt(objective, transcript),
-        },
-      ],
-    });
-    const structuredResponse = (result as { structuredResponse?: unknown }).structuredResponse;
+    const parsed = clarificationResultSchema.parse(
+      await clarifier.generateClarification({
+        systemPrompt: clarifierSystemPrompt,
+        userPrompt: buildTranscriptPrompt(objective, transcript),
+      }),
+    );
 
-    return clarificationResultSchema.parse(structuredResponse);
+    return {
+      ...parsed,
+      draftMarkdown:
+        parsed.draftMarkdown ||
+        (parsed.status === "ready_to_execute"
+          ? buildDraftMarkdown({
+              objective,
+              summary: parsed.summary,
+              executionMode: parsed.executionMode,
+              tasks: parsed.tasks,
+              eventNarrative: parsed.eventNarrative,
+            })
+          : ""),
+      questions: parsed.questions.map<ClarificationQuestionDraft>((question) => ({
+        id: slugifyQuestionId(question.id || question.prompt),
+        prompt: question.prompt,
+        helpText: question.helpText,
+        optional: question.optional ?? false,
+        inputKind: question.inputKind ?? "text",
+        options: question.options ?? [],
+        allowOther: question.allowOther ?? false,
+        otherLabel: question.otherLabel ?? "Other",
+        otherPlaceholder: question.otherPlaceholder ?? "Add a different answer",
+        prefill: {
+          selectedOptionIds: question.prefill?.selectedOptionIds ?? [],
+          otherText: question.prefill?.otherText ?? "",
+          text: question.prefill?.text ?? "",
+        },
+      })),
+    };
   } catch {
-    return fallbackClarification(objective, transcript);
+    return fallbackClarification(objective, transcript, clarificationRounds);
   }
 }
-
-const clarificationGraph = new StateGraph(ClarificationGraphState)
-  .addNode("clarify", async (state) => {
-    const result = await callDeepClarifier(state.objective, state.transcript);
-    return { result };
-  })
-  .addEdge(START, "clarify")
-  .addEdge("clarify", END)
-  .compile();
 
 function createEvent(params: {
   runId: string;
@@ -516,14 +698,19 @@ const executionGraph = new StateGraph(ExecutionGraphState)
 export async function clarifyObjective(params: {
   objective: string;
   transcript: TranscriptTurn[];
+  clarificationRounds?: number;
 }) {
-  const result = await clarificationGraph.invoke({
-    objective: params.objective,
-    transcript: params.transcript,
-    result: null,
-  });
+  const result = await callStructuredClarifier(
+    params.objective,
+    params.transcript,
+    params.clarificationRounds ?? 0,
+  );
 
-  return result.result ?? fallbackClarification(params.objective, params.transcript);
+  return result ?? fallbackClarification(
+    params.objective,
+    params.transcript,
+    params.clarificationRounds ?? 0,
+  );
 }
 
 export function buildInitialRunPayload(params: {

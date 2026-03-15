@@ -1,19 +1,23 @@
 "use client";
 
-import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
-import { createContext, useContext, useEffect, useEffectEvent, useRef, useState } from "react";
+import type { AuthChangeEvent, AuthError, Session, User } from "@supabase/supabase-js";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 
-import {
-  clearCachedAuthUser,
-  getCachedAuthUser,
-  setCachedAuthUser,
-} from "@/lib/query/persistence";
 import { createClient } from "@/lib/supabase/client";
 
 type AuthUser = {
+  avatar: string;
   email: string | null;
   id: string;
+  name: string;
 };
 
 type AuthContextValue = {
@@ -22,6 +26,27 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const AUTH_USER_STORAGE_KEY = "autobot-auth-user";
+
+function getDisplayName(user: {
+  email?: string | null;
+  user_metadata?: {
+    full_name?: string | null;
+    name?: string | null;
+  };
+}) {
+  const metadataName = user.user_metadata?.full_name ?? user.user_metadata?.name;
+
+  if (metadataName) {
+    return metadataName;
+  }
+
+  if (user.email) {
+    return user.email.split("@")[0];
+  }
+
+  return "User";
+}
 
 function mapUser(user: User | null): AuthUser | null {
   if (!user) {
@@ -29,9 +54,47 @@ function mapUser(user: User | null): AuthUser | null {
   }
 
   return {
+    avatar: user.user_metadata?.avatar_url ?? "",
     email: user.email ?? null,
     id: user.id,
+    name: getDisplayName(user),
   };
+}
+
+function readStoredUser() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const value = window.localStorage.getItem(AUTH_USER_STORAGE_KEY);
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<AuthUser>;
+
+    if (
+      typeof parsed?.id !== "string" ||
+      parsed.id.length === 0 ||
+      typeof parsed?.name !== "string" ||
+      typeof parsed?.avatar !== "string" ||
+      (parsed.email !== null && parsed.email !== undefined && typeof parsed.email !== "string")
+    ) {
+      window.localStorage.removeItem(AUTH_USER_STORAGE_KEY);
+      return null;
+    }
+
+    return {
+      avatar: parsed.avatar,
+      email: parsed.email ?? null,
+      id: parsed.id,
+      name: parsed.name,
+    };
+  } catch {
+    window.localStorage.removeItem(AUTH_USER_STORAGE_KEY);
+    return null;
+  }
 }
 
 export function AuthProvider({
@@ -42,7 +105,19 @@ export function AuthProvider({
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const previousUserIdRef = useRef<string | null>(null);
+  const hasResolvedInitialSessionRef = useRef(false);
   const router = useRouter();
+
+  useEffect(() => {
+    const storedUser = readStoredUser();
+
+    if (!storedUser) {
+      return;
+    }
+
+    previousUserIdRef.current = storedUser.id;
+    setUser(storedUser);
+  }, []);
 
   const applySession = useEffectEvent(
     async ({ refreshServer, nextUser }: { refreshServer: boolean; nextUser: AuthUser | null }) => {
@@ -54,10 +129,12 @@ export function AuthProvider({
       setUser(nextUser);
       setIsLoading(false);
 
-      if (nextUser) {
-        void setCachedAuthUser(nextUser);
-      } else {
-        void clearCachedAuthUser();
+      if (typeof window !== "undefined") {
+        if (nextUser) {
+          window.localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(nextUser));
+        } else {
+          window.localStorage.removeItem(AUTH_USER_STORAGE_KEY);
+        }
       }
 
       if (refreshServer && (userChanged || (!nextUserId && previousUserId))) {
@@ -68,15 +145,14 @@ export function AuthProvider({
 
   const handleAuthStateChange = useEffectEvent(
     async (event: AuthChangeEvent, session: Session | null) => {
-      const shouldRefreshServer =
-        event === "SIGNED_IN" ||
-        event === "SIGNED_OUT" ||
-        event === "USER_UPDATED";
-
       await applySession({
         nextUser: mapUser(session?.user ?? null),
-        refreshServer: shouldRefreshServer,
+        refreshServer:
+          hasResolvedInitialSessionRef.current &&
+          (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED"),
       });
+
+      hasResolvedInitialSessionRef.current = true;
     },
   );
 
@@ -84,24 +160,17 @@ export function AuthProvider({
     const supabase = createClient();
     let isMounted = true;
 
-    async function bootstrapAuthState() {
-      try {
-        const cachedUser = await getCachedAuthUser();
+    void supabase.auth
+      .getSession()
+      .then(
+        ({ data, error }: { data: { session: Session | null }; error: AuthError | null }) => {
+          if (!isMounted || error || hasResolvedInitialSessionRef.current) {
+            return;
+          }
 
-        if (isMounted && cachedUser) {
-          previousUserIdRef.current = cachedUser.id;
-          setUser(cachedUser);
-        }
-      } catch {
-        if (!isMounted) {
-          return;
-        }
-
-        setIsLoading(false);
-      }
-    }
-
-    void bootstrapAuthState();
+          void handleAuthStateChange("INITIAL_SESSION", data.session);
+        },
+      );
 
     const {
       data: { subscription },
@@ -113,7 +182,7 @@ export function AuthProvider({
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [applySession, handleAuthStateChange]);
+  }, [handleAuthStateChange]);
 
   return <AuthContext.Provider value={{ isLoading, user }}>{children}</AuthContext.Provider>;
 }

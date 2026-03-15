@@ -1,7 +1,7 @@
 "use client";
 
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { useEffect, useRef, useState } from "react";
 
@@ -14,10 +14,14 @@ import {
 import { useAuth } from "@/components/providers/auth-provider";
 
 const GUEST_QUERY_SCOPE = "guest";
+const QUERY_SCOPE_STORAGE_KEY = "autobot-query-scope";
 
 function createQueryClient() {
   return new QueryClient({
     defaultOptions: {
+      mutations: {
+        retry: 0,
+      },
       queries: {
         gcTime: 1000 * 60 * 60 * 24,
         refetchInterval: false,
@@ -25,20 +29,18 @@ function createQueryClient() {
         refetchOnReconnect: true,
         refetchOnWindowFocus: false,
         retry: 1,
-        staleTime: 1000 * 30,
+        staleTime: 1000 * 60,
       },
     },
   });
 }
 
-function BootstrapQueryProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const [queryClient] = useState(createQueryClient);
+function readStoredQueryScope() {
+  if (typeof window === "undefined") {
+    return GUEST_QUERY_SCOPE;
+  }
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return window.localStorage.getItem(QUERY_SCOPE_STORAGE_KEY) ?? GUEST_QUERY_SCOPE;
 }
 
 function ScopedPersistedQueryProvider({
@@ -75,7 +77,7 @@ export function QueryProvider({
   children: React.ReactNode;
 }) {
   const { isLoading, user } = useAuth();
-  const cacheScope = user?.id ?? GUEST_QUERY_SCOPE;
+  const [cacheScope, setCacheScope] = useState(readStoredQueryScope);
   const previousCacheScopeRef = useRef(cacheScope);
 
   useEffect(() => {
@@ -83,19 +85,23 @@ export function QueryProvider({
       return;
     }
 
+    const resolvedCacheScope = user?.id ?? GUEST_QUERY_SCOPE;
     const previousCacheScope = previousCacheScopeRef.current;
 
-    if (previousCacheScope === cacheScope) {
+    if (previousCacheScope === resolvedCacheScope) {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(QUERY_SCOPE_STORAGE_KEY, resolvedCacheScope);
+      }
       return;
     }
 
-    previousCacheScopeRef.current = cacheScope;
+    previousCacheScopeRef.current = resolvedCacheScope;
+    setCacheScope(resolvedCacheScope);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(QUERY_SCOPE_STORAGE_KEY, resolvedCacheScope);
+    }
     void clearPersistedQueryCache(previousCacheScope);
-  }, [cacheScope, isLoading]);
-
-  if (isLoading) {
-    return <BootstrapQueryProvider>{children}</BootstrapQueryProvider>;
-  }
+  }, [isLoading, user?.id]);
 
   return (
     <ScopedPersistedQueryProvider cacheScope={cacheScope} key={cacheScope}>

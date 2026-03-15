@@ -1,40 +1,61 @@
 "use client";
 
-import { useEffect } from "react";
+import type { ComponentType } from "react";
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
+import {
+  ActivityIcon,
+  BotIcon,
+  ClipboardListIcon,
+  WrenchIcon,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  dashboardQueryKeys,
+  dashboardQueryTimings,
+  fetchJson,
+} from "@/lib/query/dashboard";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { WorkspacePayload, RunTask, RunEvent } from "@/lib/runs/types";
+import type { RunEvent, RunTask, WorkspacePayload } from "@/lib/runs/types";
 
 const colorClassMap: Record<string, string> = {
-  amber: "text-amber-300 border-amber-300/30 bg-amber-300/10",
-  cyan: "text-cyan-300 border-cyan-300/30 bg-cyan-300/10",
-  emerald: "text-emerald-300 border-emerald-300/30 bg-emerald-300/10",
-  rose: "text-rose-300 border-rose-300/30 bg-rose-300/10",
+  amber: "text-chart-2",
+  cyan: "text-chart-3",
+  emerald: "text-chart-1",
+  rose: "text-destructive",
 };
 
-async function fetchWorkspace(runId: string) {
-  const response = await fetch(`/api/runs/${runId}`, { cache: "no-store" });
-  const payload = (await response.json()) as WorkspacePayload & { error?: string };
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Unable to load run.");
-  }
-  return payload;
+export async function fetchWorkspace(runId: string) {
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}`);
 }
 
-async function advanceWorkspace(runId: string) {
-  const response = await fetch(`/api/runs/${runId}/advance`, {
+export async function advanceWorkspace(runId: string) {
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}/advance`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
-  const payload = (await response.json()) as WorkspacePayload & { error?: string };
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Unable to advance run.");
-  }
-  return payload;
 }
 
 function groupTasks(tasks: RunTask[]) {
@@ -47,24 +68,24 @@ function groupTasks(tasks: RunTask[]) {
 
 function TaskCard({ task }: { task: RunTask }) {
   return (
-    <article className="rounded-3xl border border-black/10 bg-white/85 p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">{task.title}</h3>
-        {task.agentLabel ? (
-          <Badge variant="secondary">{task.agentLabel}</Badge>
+    <Card size="sm">
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-medium">{task.title}</h3>
+          {task.agentLabel ? <Badge variant="secondary">{task.agentLabel}</Badge> : null}
+        </div>
+        {task.description ? (
+          <p className="text-sm text-muted-foreground">{task.description}</p>
         ) : null}
-      </div>
-      {task.description ? (
-        <p className="mt-3 text-sm text-foreground/65">{task.description}</p>
-      ) : null}
-    </article>
+      </CardContent>
+    </Card>
   );
 }
 
 function EventRow({ event }: { event: RunEvent }) {
   const colorToken = event.colorToken ?? "amber";
   return (
-    <div className="grid grid-cols-[auto_auto_1fr] gap-3 border-b border-white/8 px-4 py-3 text-sm last:border-b-0">
+    <div className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] gap-3 px-4 py-3 text-sm items-center">
       <span className="text-[11px] uppercase tracking-[0.2em] text-stone-500">
         {new Date(event.createdAt).toLocaleTimeString([], {
           hour: "2-digit",
@@ -74,31 +95,277 @@ function EventRow({ event }: { event: RunEvent }) {
       </span>
       <span
         className={cn(
-          "rounded-full border px-2 py-0.5 text-[11px] uppercase tracking-[0.18em]",
+          "inline-flex h-fit text-[11px] uppercase tracking-[0.18em]",
           colorClassMap[colorToken] ?? colorClassMap.amber,
         )}
       >
         {event.agentLabel ?? event.type}
       </span>
-      <span className="font-mono text-stone-200">{event.message}</span>
+      <span className="break-words font-mono text-stone-100/50 whitespace-pre-wrap">
+        {event.message}
+      </span>
     </div>
+  );
+}
+
+function TerminalFeed({ events }: { events: RunEvent[] }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight;
+  }, [events]);
+
+  if (events.length === 0) {
+    return (
+      <div className="p-4">
+        <Empty className="border-stone-800 text-stone-200">
+          <EmptyHeader>
+            <EmptyTitle className="text-stone-100">No events yet</EmptyTitle>
+            <EmptyDescription className="text-stone-400">
+              Agent activity will appear here as the run progresses.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-y-auto" ref={containerRef}>
+      <div className="divide-y divide-stone-800">
+        {events.map((event) => (
+          <EventRow event={event} key={event.id} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceHeaderSkeleton() {
+  return (
+    <Card className="overflow-hidden border-none">
+      <CardHeader className="-mt-2">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div className="w-full max-w-4xl space-y-3">
+            <Skeleton className="h-10 w-3/4 xl:h-12" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Skeleton className="h-6 w-24" />
+            <Skeleton className="h-6 w-20" />
+            <Skeleton className="h-6 w-32" />
+          </div>
+        </div>
+      </CardHeader>
+    </Card>
+  );
+}
+
+function StatCardSkeleton() {
+  return (
+    <Card className="min-w-0 p-0">
+      <CardContent className="flex items-center gap-3 py-3">
+        <Skeleton className="size-7" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-6 w-10" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TaskCardSkeleton() {
+  return (
+    <Card size="sm">
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-5 w-16" />
+        </div>
+        <div className="space-y-2">
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-5/6" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BoardColumnSkeleton({
+  titleWidth,
+  tone,
+}: {
+  titleWidth: string;
+  tone: "amber" | "cyan" | "emerald";
+}) {
+  return (
+    <Card
+      className={cn(
+        "min-h-[280px] overflow-hidden py-0 lg:h-full lg:min-h-0",
+        tone === "amber" && "border-chart-2/40",
+        tone === "cyan" && "border-chart-3/40",
+        tone === "emerald" && "border-chart-1/40",
+      )}
+    >
+      <CardHeader className="border-b py-4">
+        <div className="flex items-center justify-between gap-3">
+          <Skeleton className={cn("h-7 sm:h-8", titleWidth)} />
+          <Skeleton className="h-6 w-10" />
+        </div>
+      </CardHeader>
+
+      <CardContent className="min-h-0 flex-1 p-0 -mt-4">
+        <ScrollArea className="h-full">
+          <div className="space-y-3 p-4">
+            <TaskCardSkeleton />
+            <TaskCardSkeleton />
+            <TaskCardSkeleton />
+          </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TerminalFeedSkeleton() {
+  return (
+    <Accordion className="min-h-0" collapsible type="single">
+      <AccordionItem
+        className="overflow-hidden border border-stone-800 bg-stone-950 text-stone-50"
+        value="terminal"
+      >
+        <AccordionTrigger className="w-full border-b border-stone-800 px-4 py-3 text-stone-100 hover:no-underline">
+          <Skeleton className="h-4 w-24 bg-stone-800" />
+        </AccordionTrigger>
+        <AccordionContent className="pb-0">
+          <div className="divide-y divide-stone-800">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div
+                className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] gap-3 px-4 py-3"
+                key={index}
+              >
+                <Skeleton className="h-4 w-[4.5rem] bg-stone-800" />
+                <Skeleton className="h-4 w-20 bg-stone-800" />
+                <Skeleton className="h-4 w-full bg-stone-800" />
+              </div>
+            ))}
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
+  );
+}
+
+export function RunWorkspaceSkeleton() {
+  return (
+    <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
+      <WorkspaceHeaderSkeleton />
+
+      <div className="grid md:grid-cols-2 2xl:grid-cols-4">
+        <StatCardSkeleton />
+        <StatCardSkeleton />
+        <StatCardSkeleton />
+        <StatCardSkeleton />
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-2 lg:min-h-0 lg:grid-cols-3">
+        <BoardColumnSkeleton titleWidth="w-24" tone="amber" />
+        <BoardColumnSkeleton titleWidth="w-28" tone="cyan" />
+        <BoardColumnSkeleton titleWidth="w-28" tone="emerald" />
+      </div>
+
+      <TerminalFeedSkeleton />
+    </section>
+  );
+}
+
+export function RunWorkspaceView({
+  data,
+}: {
+  data: WorkspacePayload;
+}) {
+  const taskColumns = groupTasks(data.tasks);
+  const handoffCount = data.usage.filter((item) => item.category === "agent_handoff").length;
+  const toolCount = data.usage.filter((item) => item.category === "tool").length;
+  const chatCount = data.usage.filter((item) => item.category === "chat").length;
+
+  return (
+    <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
+      <Card className="overflow-hidden border-none">
+        <CardHeader className="-mt-2">
+          <div className="flex flex-col gap-4">
+            <div className="min-w-0 space-y-3">
+              <CardTitle className="w-full font-serif text-lg leading-tight">
+                {data.run.objective}
+              </CardTitle>
+              <p className="max-w-5xl text-sm text-muted-foreground">
+                {data.run.finalSummary ?? data.run.readinessSummary}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">{data.run.executionMode.replace("_", " ")}</Badge>
+                <Badge variant="outline">{data.run.status}</Badge>
+                <Badge variant="outline">
+                  Updated {formatDistanceToNowStrict(new Date(data.run.updatedAt))} ago
+                </Badge>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      <div className="grid md:grid-cols-2 2xl:grid-cols-4">
+        <StatCard icon={BotIcon} label="Chat turns" value={chatCount} />
+        <StatCard icon={WrenchIcon} label="Tool records" value={toolCount} />
+        <StatCard icon={ActivityIcon} label="Agent handoffs" value={handoffCount} />
+        <StatCard icon={ClipboardListIcon} label="Tasks" value={data.tasks.length} />
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-2 lg:min-h-0 lg:grid-cols-3">
+          <BoardColumn title="Waiting" tasks={taskColumns.waiting} tone="amber" />
+          <BoardColumn title="Underway" tasks={taskColumns.underway} tone="cyan" />
+          <BoardColumn title="Complete" tasks={taskColumns.complete} tone="emerald" />
+      </div>
+
+      <Accordion className="min-h-0" collapsible type="single">
+        <AccordionItem
+          className="overflow-hidden border border-stone-800 bg-stone-950 text-stone-50"
+          value="terminal"
+        >
+          <AccordionTrigger className="w-full border-b border-stone-800 px-4 py-3 text-stone-100 hover:no-underline">
+            <span className="text-sm font-medium uppercase tracking-[0.18em] text-stone-300">
+              Terminal
+            </span>
+          </AccordionTrigger>
+          <AccordionContent className="pb-0">
+            <div className="max-h-[420px] overflow-y-auto xl:max-h-[38vh]">
+              <TerminalFeed events={data.events} />
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+    </section>
   );
 }
 
 export function RunWorkspace({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
   const { data, error, isLoading } = useQuery({
-    queryKey: ["run-workspace", runId],
+    queryKey: dashboardQueryKeys.runs.workspace(runId),
     queryFn: () => fetchWorkspace(runId),
-    refetchInterval: false,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
+    staleTime: dashboardQueryTimings.runWorkspace.staleTime,
   });
 
   const advanceMutation = useMutation({
     mutationFn: () => advanceWorkspace(runId),
     onSuccess: (payload) => {
-      queryClient.setQueryData(["run-workspace", runId], payload);
+      queryClient.setQueryData(dashboardQueryKeys.runs.workspace(runId), payload);
     },
   });
 
@@ -121,96 +388,49 @@ export function RunWorkspace({ runId }: { runId: string }) {
   }, [advanceMutation, data]);
 
   if (isLoading) {
-    return <div className="py-10 text-sm text-foreground/60">Loading run workspace...</div>;
+    return <RunWorkspaceSkeleton />;
   }
 
   if (error || !data) {
     return (
-      <div className="rounded-3xl border border-rose-400/40 bg-rose-500/10 p-6 text-sm text-rose-900">
-        {error instanceof Error ? error.message : "Unable to load run."}
-      </div>
+      <Card>
+        <CardContent className="py-6">
+          <div className="border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            {error instanceof Error ? error.message : "Unable to load run."}
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
-  const taskColumns = groupTasks(data.tasks);
-  const handoffCount = data.usage.filter((item) => item.category === "agent_handoff").length;
-  const toolCount = data.usage.filter((item) => item.category === "tool").length;
-  const chatCount = data.usage.filter((item) => item.category === "chat").length;
-
   return (
-    <section className="grid h-full min-h-0 gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-      <div className="flex min-h-0 flex-col gap-6">
-        <div className="rounded-[2rem] border border-black/10 bg-[linear-gradient(135deg,rgba(255,251,235,0.95),rgba(240,244,236,0.95))] p-6 shadow-[0_24px_50px_rgba(59,45,21,0.08)]">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="space-y-3">
-              <p className="text-xs uppercase tracking-[0.28em] text-foreground/45">
-                Live Run
-              </p>
-              <h1 className="font-serif text-4xl leading-tight">{data.run.objective}</h1>
-              <p className="max-w-3xl text-sm text-foreground/70">
-                {data.run.finalSummary ?? data.run.readinessSummary}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">{data.run.executionMode.replace("_", " ")}</Badge>
-              <Badge variant="outline">{data.run.status}</Badge>
-              <Badge variant="outline">
-                Updated {formatDistanceToNowStrict(new Date(data.run.updatedAt))} ago
-              </Badge>
-            </div>
-          </div>
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            <StatCard label="Chat turns" value={chatCount} />
-            <StatCard label="Tool records" value={toolCount} />
-            <StatCard label="Agent handoffs" value={handoffCount} />
-            <StatCard label="Tasks" value={data.tasks.length} />
-          </div>
-        </div>
-
-        <div className="grid min-h-0 gap-4 md:grid-cols-3">
-          <BoardColumn title="Waiting" tasks={taskColumns.waiting} tone="amber" />
-          <BoardColumn title="Underway" tasks={taskColumns.underway} tone="cyan" />
-          <BoardColumn title="Complete" tasks={taskColumns.complete} tone="emerald" />
-        </div>
-      </div>
-
-      <div className="flex min-h-0 flex-col overflow-hidden rounded-[2rem] border border-stone-800 bg-stone-950 shadow-[0_24px_60px_rgba(18,16,12,0.45)]">
-        <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Terminal Feed</p>
-            <p className="mt-1 text-sm text-stone-300">
-              Every agent event, task move, and handoff is persisted here.
-            </p>
-          </div>
-          <Button
-            disabled={advanceMutation.isPending}
-            onClick={() => advanceMutation.mutate()}
-            size="sm"
-            variant="secondary"
-          >
-            {advanceMutation.isPending ? "Advancing..." : "Advance now"}
-          </Button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {data.events.length === 0 ? (
-            <div className="px-5 py-6 text-sm text-stone-500">No events yet.</div>
-          ) : (
-            data.events.map((event) => <EventRow event={event} key={event.id} />)
-          )}
-        </div>
-      </div>
-    </section>
+    <RunWorkspaceView
+      data={data}
+    />
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: number;
+}) {
   return (
-    <div className="rounded-2xl border border-black/10 bg-white/80 px-4 py-3">
-      <div className="text-[11px] uppercase tracking-[0.24em] text-foreground/45">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-    </div>
+    <Card className="min-w-0 p-0">
+      <CardContent className="flex items-center gap-3 py-3">
+        <div className="flex size-7 items-center justify-center border bg-muted">
+          <Icon className="size-4" />
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">{label}</div>
+          <div className="mt-0.5 text-xl font-semibold">{value}</div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -224,28 +444,36 @@ function BoardColumn({
   tone: "amber" | "cyan" | "emerald";
 }) {
   return (
-    <div
+    <Card
       className={cn(
-        "flex min-h-[420px] flex-col rounded-[1.75rem] border p-4 shadow-[0_16px_40px_rgba(59,45,21,0.08)]",
-        tone === "amber" && "border-amber-300/45 bg-amber-50/80",
-        tone === "cyan" && "border-cyan-300/45 bg-cyan-50/70",
-        tone === "emerald" && "border-emerald-300/45 bg-emerald-50/80",
+        "min-h-[280px] overflow-hidden py-0 lg:h-full lg:min-h-0",
+        tone === "amber" && "border-chart-2/40",
+        tone === "cyan" && "border-chart-3/40",
+        tone === "emerald" && "border-chart-1/40",
       )}
     >
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-serif text-2xl">{title}</h2>
-        <Badge variant="secondary">{tasks.length}</Badge>
-      </div>
+      <CardHeader className="border-b py-4">
+        <div className="flex items-center justify-between">
+          <CardTitle className="font-serif text-xl leading-none sm:text-2xl">{title}</CardTitle>
+          <Badge variant="secondary">{tasks.length}</Badge>
+        </div>
+      </CardHeader>
 
-      <div className="space-y-3">
-        {tasks.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-black/12 px-4 py-6 text-sm text-foreground/45">
-            No tasks in {title.toLowerCase()}.
+      <CardContent className="min-h-0 flex-1 p-0 -mt-4">
+        <ScrollArea className="h-full">
+          <div className="space-y-3 p-4">
+            {tasks.length === 0 ? (
+              <Empty className="border-border">
+                <EmptyHeader>
+                  <EmptyTitle>No tasks in {title.toLowerCase()}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              tasks.map((task) => <TaskCard key={task.id} task={task} />)
+            )}
           </div>
-        ) : (
-          tasks.map((task) => <TaskCard key={task.id} task={task} />)
-        )}
-      </div>
-    </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
   );
 }

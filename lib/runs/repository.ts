@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ClarificationMessage,
   RunEvent,
+  RunListItem,
   RunRecord,
   RunTask,
   TaskStatus,
@@ -70,11 +71,60 @@ export async function fetchClarificationTranscript(
   }));
 }
 
+export async function fetchRuns(
+  supabase: SupabaseClient,
+  params: { userId: string; projectId?: string | null },
+) {
+  let query = supabase
+    .from("runs")
+    .select(
+      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at",
+    )
+    .eq("user_id", params.userId)
+    .order("updated_at", { ascending: false });
+
+  if (params.projectId) {
+    query = query.eq("project_id", params.projectId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map<RunListItem>(mapRun);
+}
+
+export async function fetchLatestRunBySessionId(
+  supabase: SupabaseClient,
+  params: { sessionId: string; userId: string },
+) {
+  const { data, error } = await supabase
+    .from("runs")
+    .select(
+      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at",
+    )
+    .eq("session_id", params.sessionId)
+    .eq("user_id", params.userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? mapRun(data) : null;
+}
+
 export async function createRun(
   supabase: SupabaseClient,
   params: {
     sessionId: string;
     userId: string;
+    projectId?: string | null;
+    objectiveId?: string | null;
     objective: string;
     executionMode: ExecutionMode;
     readinessSummary: string;
@@ -85,12 +135,14 @@ export async function createRun(
     .insert({
       session_id: params.sessionId,
       user_id: params.userId,
+      project_id: params.projectId ?? null,
+      objective_id: params.objectiveId ?? null,
       objective: params.objective,
       status: "ready",
       execution_mode: params.executionMode,
       readiness_summary: params.readinessSummary,
     })
-    .select("id, session_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at")
+    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at")
     .single();
 
   if (error) {
@@ -206,7 +258,7 @@ export async function fetchWorkspace(
 ) {
   const { data: runRow, error: runError } = await supabase
     .from("runs")
-    .select("id, session_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at")
+    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at")
     .eq("id", params.runId)
     .eq("user_id", params.userId)
     .single();
@@ -308,6 +360,8 @@ export async function updateTaskStatuses(
 function mapRun(row: {
   id: string;
   session_id: string;
+  project_id: string | null;
+  objective_id: string | null;
   objective: string;
   status: RunStatus;
   execution_mode: ExecutionMode;
@@ -319,6 +373,8 @@ function mapRun(row: {
   return {
     id: row.id,
     sessionId: row.session_id,
+    projectId: row.project_id,
+    objectiveId: row.objective_id,
     objective: row.objective,
     status: row.status,
     executionMode: row.execution_mode,
