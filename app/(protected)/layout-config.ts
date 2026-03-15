@@ -42,71 +42,6 @@ export const protectedNavMain: SidebarNavItem[] = [
     //   },
     // ],
   },
-  // {
-  //   title: "Models",
-  //   href: "#",
-  //   icon: BotIcon,
-  //   items: [
-  //     {
-  //       title: "Genesis",
-  //       href: "#",
-  //     },
-  //     {
-  //       title: "Explorer",
-  //       href: "#",
-  //     },
-  //     {
-  //       title: "Quantum",
-  //       href: "#",
-  //     },
-  //   ],
-  // },
-  // {
-  //   title: "Documentation",
-  //   href: "#",
-  //   icon: BookOpenIcon,
-  //   items: [
-  //     {
-  //       title: "Introduction",
-  //       href: "#",
-  //     },
-  //     {
-  //       title: "Get Started",
-  //       href: "#",
-  //     },
-  //     {
-  //       title: "Tutorials",
-  //       href: "#",
-  //     },
-  //     {
-  //       title: "Changelog",
-  //       href: "#",
-  //     },
-  //   ],
-  // },
-  // {
-  //   title: "Settings",
-  //   href: "#",
-  //   icon: Settings2Icon,
-  //   items: [
-  //     {
-  //       title: "General",
-  //       href: "#",
-  //     },
-  //     {
-  //       title: "Team",
-  //       href: "#",
-  //     },
-  //     {
-  //       title: "Billing",
-  //       href: "#",
-  //     },
-  //     {
-  //       title: "Limits",
-  //       href: "#",
-  //     },
-  //   ],
-  // },
 ];
 
 export const protectedNavSecondary: SidebarNavItem[] = [
@@ -129,8 +64,8 @@ export const protectedProjects: SidebarProjectItem[] = [
     icon: FileTextIcon,
   },
   {
-    name: "Projects",
-    href: "/dashboard/projects",
+    name: "Chat",
+    href: "/dashboard/chats",
     icon: FolderKanbanIcon,
   },
   {
@@ -143,7 +78,7 @@ export const protectedProjects: SidebarProjectItem[] = [
 export const protectedRouteTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/dashboard/drafts": "Drafts",
-  "/dashboard/projects": "Projects",
+  "/dashboard/chats": "Chat",
   "/dashboard/runs": "Runs",
 };
 

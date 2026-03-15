@@ -89,6 +89,27 @@ export type ProjectChatResponse = {
   citedMemoryIds: string[];
 };
 
+export type ProjectChatStreamEvent =
+  | {
+      type: "thread";
+      threadId: string;
+    }
+  | {
+      type: "route";
+      routedAgentId: string;
+    }
+  | {
+      type: "token";
+      text: string;
+    }
+  | ({
+      type: "final";
+    } & ProjectChatResponse)
+  | {
+      type: "error";
+      error: string;
+    };
+
 export type ProjectOnboardingRequest = {
   name: string;
   description: string;

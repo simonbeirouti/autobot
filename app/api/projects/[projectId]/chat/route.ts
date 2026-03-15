@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { invokeProjectChat, promoteDurableFactsFromTurn } from "@/lib/agents/project-chat";
+import { promoteDurableFactsFromTurn, streamProjectChat } from "@/lib/agents/project-chat";
 import { resolveCompanyKey } from "@/lib/projects/context";
 import {
   appendProjectChatMessage,
@@ -11,6 +11,7 @@ import {
   fetchProjectThread,
   touchProjectChatThread,
 } from "@/lib/projects/repository";
+import type { ProjectChatResponse, ProjectChatStreamEvent } from "@/lib/projects/types";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -78,39 +79,83 @@ export async function POST(
       objectiveId: thread.objectiveId,
     });
 
-    const response = await invokeProjectChat(supabase, {
-      userId: user.sub,
-      companyKey,
-      project,
-      objective,
-      objectiveId: thread.objectiveId,
-      threadId: thread.id,
-      message: body.message,
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const pushEvent = (event: ProjectChatStreamEvent) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        };
+
+        pushEvent({ type: "thread", threadId: thread.id });
+
+        try {
+          const response = streamProjectChat(supabase, {
+            userId: user.sub,
+            companyKey,
+            project,
+            objective,
+            objectiveId: thread.objectiveId,
+            threadId: thread.id,
+            message: body.message,
+          });
+
+          let payload: ProjectChatResponse | null = null;
+
+          while (true) {
+            const next = await response.next();
+            if (next.done) {
+              payload = next.value;
+              break;
+            }
+
+            pushEvent(next.value);
+          }
+
+          if (!payload) {
+            throw new Error("Chat response stream ended without a final payload.");
+          }
+
+          await appendProjectChatMessage(supabase, {
+            threadId: thread.id,
+            projectId,
+            userId: user.sub,
+            role: "assistant",
+            content: payload.answer,
+            agentId: payload.routedAgentId,
+            citedMemoryIds: payload.citedMemoryIds,
+            objectiveId: thread.objectiveId,
+          });
+
+          await promoteDurableFactsFromTurn(supabase, {
+            userId: user.sub,
+            companyKey,
+            project,
+            objectiveId: thread.objectiveId,
+            threadId: thread.id,
+            userMessage: body.message,
+            assistantMessage: payload.answer,
+            agentId: payload.routedAgentId as "orchestrator" | "researcher" | "operator" | "analyst",
+          });
+
+          pushEvent({ type: "final", ...payload });
+          controller.close();
+        } catch (error) {
+          pushEvent({
+            type: "error",
+            error: error instanceof Error ? error.message : "Unable to send project message.",
+          });
+          controller.close();
+        }
+      },
     });
 
-    await appendProjectChatMessage(supabase, {
-      threadId: thread.id,
-      projectId,
-      userId: user.sub,
-      role: "assistant",
-      content: response.answer,
-      agentId: response.routedAgentId,
-      citedMemoryIds: response.citedMemoryIds,
-      objectiveId: thread.objectiveId,
+    return new Response(stream, {
+      headers: {
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "Content-Type": "text/event-stream; charset=utf-8",
+      },
     });
-
-    await promoteDurableFactsFromTurn(supabase, {
-      userId: user.sub,
-      companyKey,
-      project,
-      objectiveId: thread.objectiveId,
-      threadId: thread.id,
-      userMessage: body.message,
-      assistantMessage: response.answer,
-      agentId: response.routedAgentId as "orchestrator" | "researcher" | "operator" | "analyst",
-    });
-
-    return NextResponse.json(response);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to send project message." },

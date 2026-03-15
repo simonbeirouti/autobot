@@ -31,11 +31,39 @@ pnpm dev
 
 4. Open [http://localhost:3000](http://localhost:3000)
 
-## Autonomous run setup
+## Local Supabase workflow
 
-1. Apply the SQL schema in [supabase/migrations/20260311_autobot_runs.sql](/Users/besi/Developer/ai/autobot/supabase/migrations/20260311_autobot_runs.sql) to your Supabase project.
-   Apply [supabase/migrations/20260310_profiles_and_files.sql](/Users/besi/Developer/ai/autobot/supabase/migrations/20260310_profiles_and_files.sql) first, then [supabase/migrations/20260311_autobot_runs.sql](/Users/besi/Developer/ai/autobot/supabase/migrations/20260311_autobot_runs.sql).
-2. Set these additional environment variables:
+This repo includes a local Supabase project under [supabase](/Users/besi/Developer/ai/autobot/supabase). Local development is opt-in, so you can keep using a remote Supabase project or switch to local when you want a reproducible reset + seed flow.
+
+Quick start:
+
+```bash
+pnpm supabase:start
+pnpm supabase:status
+cp .env.local.example .env.local
+pnpm supabase:reset
+pnpm supabase:verify
+pnpm dev
+```
+
+After reset, sign in with:
+
+- `demo@autobot.local`
+- `Autobot123!`
+
+`pnpm supabase:reset` rebuilds the local database from the migration files in [supabase/migrations](/Users/besi/Developer/ai/autobot/supabase/migrations) and then runs [supabase/seed.sql](/Users/besi/Developer/ai/autobot/supabase/seed.sql). The declarative schema source of truth remains [supabase/schemas](/Users/besi/Developer/ai/autobot/supabase/schemas); the matching migration files exist so the Supabase CLI can apply that schema during local reset and push workflows. `pnpm supabase:verify` prints the local table inventory so you can confirm tables such as `profiles`, `runs`, `intake_drafts`, `projects`, and `memory_records` were created.
+
+The schema files under [supabase/schemas](/Users/besi/Developer/ai/autobot/supabase/schemas) are ordered with numbered `NN-kebab-name.sql` filenames. Each table owns its own schema file, including indexes, update triggers, RLS, and policies.
+
+## Database setup
+
+1. If you are using a hosted Supabase project instead of local Supabase, use the SQL files in [supabase/schemas](/Users/besi/Developer/ai/autobot/supabase/schemas) as the source of truth and keep the matching files in [supabase/migrations](/Users/besi/Developer/ai/autobot/supabase/migrations) in sync for Supabase CLI workflows.
+
+2. Generate new timestamped Supabase migrations from the numbered schema files with `pnpm supabase:migration:sync <name>`. This resets local Supabase, applies the ordered schema files, creates a diff migration, and regenerates local types.
+
+3. Use `pnpm supabase:migration:new <name>` only when you intentionally want an empty migration file.
+
+4. Set these additional environment variables:
 
 ```env
 LLM_PROVIDER=openai
@@ -45,7 +73,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 ANTHROPIC_MODEL=claude-sonnet-4-5
 ```
 
-3. Sign in before creating a run. Run state, telemetry, and clarification history are stored per authenticated user.
+5. Sign in before creating a run. Run state, telemetry, and clarification history are stored per authenticated user.
 
 ## Notes
 
@@ -60,4 +88,14 @@ pnpm dev
 pnpm build
 pnpm start
 pnpm lint
+pnpm supabase:start
+pnpm supabase:status
+pnpm supabase:reset
+pnpm supabase:db:diff
+pnpm supabase:db:lint
+pnpm supabase:migration:sync add_feature_name
+pnpm supabase:migration:new add_feature_name
+pnpm supabase:verify
+pnpm supabase:stop
+pnpm supabase:typegen
 ```

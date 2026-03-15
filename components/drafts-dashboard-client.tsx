@@ -699,8 +699,10 @@ export function DraftsDashboardClient({
   });
 
   const drafts = getActiveDrafts(draftsQuery.data ?? []);
+  const hasDraftsLoadError =
+    Boolean(draftsQuery.error) && !draftsQuery.isLoading && !draftsQuery.isFetching;
   const showDraftsError = useDelayedVisibility(
-    Boolean(draftsQuery.error),
+    hasDraftsLoadError,
     ERROR_VISIBILITY_DELAY_MS,
   );
   const selectedDraftId =
@@ -737,7 +739,13 @@ export function DraftsDashboardClient({
         : undefined,
     staleTime: dashboardQueryTimings.draftFlow.staleTime,
   });
-  const showFlowError = useDelayedVisibility(Boolean(flowQuery.error), ERROR_VISIBILITY_DELAY_MS);
+  const showFlowError = useDelayedVisibility(
+    Boolean(flowQuery.error) && !flowQuery.isLoading && !flowQuery.isFetching,
+    ERROR_VISIBILITY_DELAY_MS,
+  );
+  const isFlowTransitioning = Boolean(selectedDraftId) && deferredDraftId !== selectedDraftId;
+  const isFlowLoading =
+    isFlowTransitioning || flowQuery.isLoading || (flowQuery.isFetching && !flowQuery.data);
 
   useEffect(() => {
     if (!flowQuery.data) {
@@ -1049,7 +1057,7 @@ export function DraftsDashboardClient({
               </Empty>
             </CardContent>
           </Card>
-        ) : flowQuery.isLoading || (flowQuery.error && !showFlowError) ? (
+        ) : isFlowLoading || (flowQuery.error && !showFlowError) ? (
           <DraftWorkspaceSkeleton />
         ) : flowQuery.error || !flowQuery.data ? (
           <Card className="min-h-[320px] overflow-hidden xl:h-full xl:min-h-0">

@@ -4,7 +4,18 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "supabase": "supabase",
+    "supabase:start": "sh -c 'supabase status >/dev/null 2>&1 || supabase start'",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "supabase:reset": "supabase db reset",
+    "supabase:db:diff": "supabase db diff",
+    "supabase:db:lint": "supabase db lint",
+    "supabase:migration:new": "supabase migration new",
+    "supabase:migration:sync": "node ./scripts/supabase-sync-migration.mjs",
+    "supabase:verify": "supabase inspect db table-stats --local",
+    "supabase:typegen": "sh -c 'supabase gen types typescript --local > ./lib/database.types.ts'"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",

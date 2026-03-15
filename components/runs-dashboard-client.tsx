@@ -123,7 +123,9 @@ export function RunsDashboardClient({
   });
 
   const runs = runsQuery.data ?? [];
-  const showRunsError = useDelayedVisibility(Boolean(runsQuery.error), ERROR_VISIBILITY_DELAY_MS);
+  const hasRunsLoadError =
+    Boolean(runsQuery.error) && !runsQuery.isLoading && !runsQuery.isFetching;
+  const showRunsError = useDelayedVisibility(hasRunsLoadError, ERROR_VISIBILITY_DELAY_MS);
   const selectedRunId =
     requestedRunId && runs.some((run) => run.id === requestedRunId)
       ? requestedRunId
@@ -173,9 +175,12 @@ export function RunsDashboardClient({
   });
 
   const showWorkspaceError = useDelayedVisibility(
-    Boolean(workspaceQuery.error),
+    Boolean(workspaceQuery.error) && !workspaceQuery.isLoading && !workspaceQuery.isFetching,
     ERROR_VISIBILITY_DELAY_MS,
   );
+  const isWorkspaceTransitioning = Boolean(selectedRunId) && deferredRunId !== selectedRunId;
+  const isWorkspaceLoading =
+    isWorkspaceTransitioning || workspaceQuery.isLoading || (workspaceQuery.isFetching && !workspaceQuery.data);
 
   useEffect(() => {
     if (!workspaceQuery.data || !selectedRunId) {
@@ -323,7 +328,7 @@ export function RunsDashboardClient({
               </Empty>
             </CardContent>
           </Card>
-        ) : workspaceQuery.isLoading || (workspaceQuery.error && !showWorkspaceError) ? (
+        ) : isWorkspaceLoading || (workspaceQuery.error && !showWorkspaceError) ? (
           <RunWorkspaceSkeleton />
         ) : workspaceQuery.error || !workspaceQuery.data ? (
           <Card className="min-h-[320px] overflow-hidden xl:h-full xl:min-h-0">

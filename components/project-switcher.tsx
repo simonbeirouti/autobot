@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { CheckIcon, ChevronsUpDown, FolderKanbanIcon, PlusIcon } from "lucide-react";
 
 import { useProject } from "@/components/providers/project-provider";
@@ -18,11 +18,19 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  DASHBOARD_HOME_ROUTE,
+  PROJECT_ONBOARDING_ROUTE,
+  getProjectSwitcherDestination,
+} from "@/lib/routes";
 
 export function ProjectSwitcher() {
   const router = useRouter();
+  const pathname = usePathname();
   const { isMobile } = useSidebar();
   const { activeProject, projects, setActiveProjectId } = useProject();
+
+  const switchDestination = getProjectSwitcherDestination(pathname);
 
   return (
     <SidebarMenu>
@@ -65,7 +73,7 @@ export function ProjectSwitcher() {
                 key={project.id}
                 onClick={() => {
                   setActiveProjectId(project.id);
-                  router.push("/dashboard/projects");
+                  router.push(switchDestination || DASHBOARD_HOME_ROUTE);
                 }}
                 className="gap-3 p-2"
               >
@@ -84,7 +92,7 @@ export function ProjectSwitcher() {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="gap-2 p-2"
-              onClick={() => router.push("/dashboard?createProject=1")}
+              onClick={() => router.push(PROJECT_ONBOARDING_ROUTE)}
             >
               <div className="flex size-6 items-center justify-center rounded-md border bg-transparent">
                 <PlusIcon className="size-4" />

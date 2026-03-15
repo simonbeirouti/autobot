@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsRestoring, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/components/providers/auth-provider";
 import { dashboardQueryKeys, dashboardQueryTimings, fetchJson } from "@/lib/query/dashboard";
@@ -32,6 +32,7 @@ export function ProjectProvider({
   children: React.ReactNode;
 }) {
   const { isLoading: isAuthLoading, user } = useAuth();
+  const isRestoring = useIsRestoring();
   const queryClient = useQueryClient();
   const [activeProjectId, setActiveProjectIdState] = useState<string | null>(readStoredProjectId);
 
@@ -39,10 +40,13 @@ export function ProjectProvider({
     queryKey: dashboardQueryKeys.projects.all,
     queryFn: () => fetchJson<Project[]>("/api/projects"),
     enabled: Boolean(user?.id),
+    refetchOnMount: "always",
     staleTime: dashboardQueryTimings.projects.staleTime,
   });
 
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const isProjectStateLoading =
+    isAuthLoading || isRestoring || (Boolean(user?.id) && !projectsQuery.isFetchedAfterMount);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -53,6 +57,10 @@ export function ProjectProvider({
       window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
       setActiveProjectIdState(null);
       void queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.projects.all });
+      return;
+    }
+
+    if (isProjectStateLoading) {
       return;
     }
 
@@ -69,7 +77,7 @@ export function ProjectProvider({
     if (nextProjectId) {
       window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, nextProjectId);
     }
-  }, [activeProjectId, projects, queryClient, user?.id]);
+  }, [activeProjectId, isProjectStateLoading, projects, queryClient, user?.id]);
 
   const value = useMemo<ProjectContextValue>(() => {
     const activeProject =
@@ -80,7 +88,7 @@ export function ProjectProvider({
     return {
       activeProject,
       activeProjectId: activeProject?.id ?? activeProjectId ?? null,
-      isLoading: isAuthLoading || projectsQuery.isLoading,
+      isLoading: isProjectStateLoading,
       projects,
       setActiveProjectId(projectId) {
         setActiveProjectIdState(projectId);
@@ -93,7 +101,7 @@ export function ProjectProvider({
         }
       },
     };
-  }, [activeProjectId, isAuthLoading, projects, projectsQuery.isLoading]);
+  }, [activeProjectId, isProjectStateLoading, projects]);
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;
 }

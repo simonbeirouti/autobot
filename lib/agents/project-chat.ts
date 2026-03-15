@@ -28,7 +28,12 @@ import {
 } from "@/lib/memory/policy";
 import { resolveMemoryContext, writeLongTermMemory } from "@/lib/memory/repository";
 import type { MemoryContext } from "@/lib/memory/types";
-import type { Objective, Project, ProjectChatResponse } from "@/lib/projects/types";
+import type {
+  Objective,
+  Project,
+  ProjectChatResponse,
+  ProjectChatStreamEvent,
+} from "@/lib/projects/types";
 
 const ProjectChatState = Annotation.Root({
   ...MessagesAnnotation.spec,
@@ -286,6 +291,137 @@ export async function invokeProjectChat(
     routedAgentId: result.routedAgentId ?? "orchestrator",
     answer: normalizeMessageContent(result.messages.at(-1)?.content ?? ""),
     citedMemoryIds: result.citedMemoryIds ?? citedMemoryIds,
+  };
+}
+
+function getNodeUpdate(
+  chunk: unknown,
+  nodeName: string,
+): Record<string, unknown> | null {
+  if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) {
+    return null;
+  }
+
+  const nodeUpdate = (chunk as Record<string, unknown>)[nodeName];
+  if (!nodeUpdate || typeof nodeUpdate !== "object" || Array.isArray(nodeUpdate)) {
+    return null;
+  }
+
+  return nodeUpdate as Record<string, unknown>;
+}
+
+function getMetadataNodeName(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const value = (metadata as Record<string, unknown>).langgraph_node;
+  return typeof value === "string" ? value : null;
+}
+
+function getChunkText(chunk: unknown) {
+  if (!chunk || typeof chunk !== "object") {
+    return "";
+  }
+
+  const content = (chunk as { content?: BaseMessage["content"] }).content;
+  return normalizeMessageContent(content ?? "");
+}
+
+export async function* streamProjectChat(
+  supabase: SupabaseClient,
+  params: {
+    userId: string;
+    companyKey: string;
+    project: Project;
+    objectiveId?: string | null;
+    objective?: Objective | null;
+    threadId: string;
+    message: string;
+  },
+): AsyncGenerator<ProjectChatStreamEvent, ProjectChatResponse, void> {
+  const [graph, memoryContext] = await Promise.all([
+    getCompiledProjectChatGraph(),
+    appendChatTurn(supabase, {
+      userId: params.userId,
+      companyKey: params.companyKey,
+      project: params.project,
+      objective: params.objective ?? null,
+      threadId: params.threadId,
+      message: params.message,
+    }),
+  ]);
+
+  const citedMemoryIds = collectCitedMemoryIds(memoryContext);
+  let routedAgentId = "orchestrator";
+  let answer = "";
+
+  const stream = await graph.stream(
+    {
+      messages: [new HumanMessage(params.message)],
+      projectName: params.project.name,
+      projectDescription: params.project.description,
+      objectiveTitle: params.objective?.title ?? null,
+      objectiveDescription: params.objective?.description ?? null,
+      memoryContextMarkdown: formatMemoryContext(params.project, memoryContext, params.objective ?? null),
+      citedMemoryIds,
+    },
+    {
+      configurable: { thread_id: params.threadId },
+      streamMode: ["updates", "messages"],
+    },
+  );
+
+  for await (const [mode, chunk] of stream) {
+    if (mode === "updates") {
+      const routeUpdate = getNodeUpdate(chunk, "route");
+      const nextAgentId = routeUpdate?.routedAgentId;
+      if (typeof nextAgentId === "string" && nextAgentId.length > 0 && nextAgentId !== routedAgentId) {
+        routedAgentId = nextAgentId;
+        yield { type: "route", routedAgentId };
+      }
+
+      const answerUpdate = getNodeUpdate(chunk, "answer");
+      const nextCitedMemoryIds = answerUpdate?.citedMemoryIds;
+      if (Array.isArray(nextCitedMemoryIds)) {
+        citedMemoryIds.splice(0, citedMemoryIds.length, ...nextCitedMemoryIds.filter((id): id is string => typeof id === "string"));
+      }
+
+      const nextMessages = answerUpdate?.messages;
+      if (!answer && Array.isArray(nextMessages) && nextMessages.length > 0) {
+        const finalMessage = nextMessages.at(-1);
+        const finalText = getChunkText(finalMessage);
+        if (finalText) {
+          answer = finalText;
+        }
+      }
+
+      continue;
+    }
+
+    if (mode !== "messages" || !Array.isArray(chunk)) {
+      continue;
+    }
+
+    const [messageChunk, metadata] = chunk;
+    if (getMetadataNodeName(metadata) !== "answer") {
+      continue;
+    }
+
+    const token = getChunkText(messageChunk);
+    if (!token) {
+      continue;
+    }
+
+    answer += token;
+    yield { type: "token", text: token };
+  }
+
+  return {
+    threadId: params.threadId,
+    routedAgentId,
+    answer,
+    citedMemoryIds,
   };
 }
 

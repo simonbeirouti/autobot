@@ -13,6 +13,8 @@ import {
 
 export function NavSecondary({
   items,
+  activeHref,
+  onItemClick,
   ...props
 }: {
   items: {
@@ -20,6 +22,8 @@ export function NavSecondary({
     href: string;
     title: string;
   }[];
+  activeHref?: string | null;
+  onItemClick?: (href: string) => void;
 } & React.ComponentPropsWithoutRef<typeof SidebarGroup>) {
   return (
     <SidebarGroup {...props}>
@@ -30,8 +34,12 @@ export function NavSecondary({
 
             return (
               <SidebarMenuItem key={item.title}>
-                <SidebarMenuButton asChild size="sm">
-                  <Link href={item.href}>
+                <SidebarMenuButton
+                  asChild
+                  size="sm"
+                  isActive={activeHref === item.href}
+                >
+                  <Link href={item.href} onClick={() => onItemClick?.(item.href)}>
                     <Icon />
                     <span>{item.title}</span>
                   </Link>

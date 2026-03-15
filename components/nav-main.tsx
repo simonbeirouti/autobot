@@ -23,6 +23,8 @@ import {
 
 export function NavMain({
   items,
+  activeHref,
+  onItemClick,
 }: {
   items: {
     icon: LucideIcon;
@@ -34,6 +36,8 @@ export function NavMain({
     href: string;
     title: string;
   }[];
+  activeHref?: string | null;
+  onItemClick?: (href: string) => void;
 }) {
   return (
     <SidebarGroup>
@@ -41,12 +45,14 @@ export function NavMain({
       <SidebarMenu>
         {items.map((item) => {
           const Icon = item.icon;
+          const isItemActive =
+            activeHref === item.href || item.items?.some((subItem) => activeHref === subItem.href);
 
           return (
-            <Collapsible key={item.title} asChild defaultOpen={item.isActive}>
+            <Collapsible key={item.title} asChild defaultOpen={isItemActive || item.isActive}>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip={item.title}>
-                  <Link href={item.href}>
+                <SidebarMenuButton asChild tooltip={item.title} isActive={isItemActive}>
+                  <Link href={item.href} onClick={() => onItemClick?.(item.href)}>
                     <Icon />
                     <span>{item.title}</span>
                   </Link>
@@ -63,8 +69,11 @@ export function NavMain({
                       <SidebarMenuSub>
                         {item.items.map((subItem) => (
                           <SidebarMenuSubItem key={subItem.title}>
-                            <SidebarMenuSubButton asChild>
-                              <Link href={subItem.href}>
+                            <SidebarMenuSubButton
+                              asChild
+                              isActive={activeHref === subItem.href}
+                            >
+                              <Link href={subItem.href} onClick={() => onItemClick?.(subItem.href)}>
                                 <span>{subItem.title}</span>
                               </Link>
                             </SidebarMenuSubButton>

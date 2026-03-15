@@ -1,12 +1,14 @@
 "use client";
 
-import Link from "next/link";
-import { TerminalIcon } from "lucide-react";
+import * as React from "react";
+import { usePathname } from "next/navigation";
 
 import {
   protectedNavMain,
   protectedNavSecondary,
   protectedProjects,
+  type SidebarNavItem,
+  type SidebarProjectItem,
 } from "@/app/(protected)/layout-config";
 import { NavMain } from "@/components/nav-main";
 import { NavProjects } from "@/components/nav-projects";
@@ -18,41 +20,107 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
+  SidebarHeader
 } from "@/components/ui/sidebar";
+
+const SIDEBAR_ACTIVE_ITEM_COOKIE_NAME = "sidebar_active_item";
+const SIDEBAR_ACTIVE_ITEM_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
+
+function readCookie(name: string) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const cookie = document.cookie
+    .split("; ")
+    .find((entry) => entry.startsWith(`${name}=`));
+
+  return cookie ? decodeURIComponent(cookie.split("=").slice(1).join("=")) : null;
+}
+
+function matchesHref(pathname: string, href: string) {
+  if (!href || href === "#") {
+    return false;
+  }
+
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function findMatchingHref(
+  pathname: string,
+  mainItems: SidebarNavItem[],
+  projectItems: SidebarProjectItem[],
+  secondaryItems: SidebarNavItem[]
+) {
+  for (const item of mainItems) {
+    if (matchesHref(pathname, item.href)) {
+      return item.href;
+    }
+
+    const subItemMatch = item.items?.find((subItem) => matchesHref(pathname, subItem.href));
+    if (subItemMatch) {
+      return subItemMatch.href;
+    }
+  }
+
+  const projectMatch = projectItems.find((item) => matchesHref(pathname, item.href));
+  if (projectMatch) {
+    return projectMatch.href;
+  }
+
+  const secondaryMatch = secondaryItems.find((item) => matchesHref(pathname, item.href));
+  return secondaryMatch?.href ?? null;
+}
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const { user } = useAuth();
+  const pathname = usePathname();
+  const [lastClickedHref, setLastClickedHref] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setLastClickedHref(readCookie(SIDEBAR_ACTIVE_ITEM_COOKIE_NAME));
+  }, []);
+
+  const activeHref = React.useMemo(
+    () =>
+      findMatchingHref(
+        pathname,
+        protectedNavMain,
+        protectedProjects,
+        protectedNavSecondary
+      ) ?? lastClickedHref,
+    [lastClickedHref, pathname]
+  );
+
+  const handleItemClick = React.useCallback((href: string) => {
+    setLastClickedHref(href);
+    document.cookie = `${SIDEBAR_ACTIVE_ITEM_COOKIE_NAME}=${encodeURIComponent(href)}; path=/; max-age=${SIDEBAR_ACTIVE_ITEM_COOKIE_MAX_AGE}`;
+  }, []);
 
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <div className="space-y-2">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton size="lg" asChild>
-                <Link href="/dashboard">
-                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                    <TerminalIcon className="size-4" />
-                  </div>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-medium">AutoBot</span>
-                    <span className="truncate text-xs">Workspace</span>
-                  </div>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
           <ProjectSwitcher />
         </div>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={protectedNavMain} />
-        <NavProjects projects={protectedProjects} />
-        <NavSecondary items={protectedNavSecondary} className="mt-auto" />
+        <NavMain
+          items={protectedNavMain}
+          activeHref={activeHref}
+          onItemClick={handleItemClick}
+        />
+        <NavProjects
+          projects={protectedProjects}
+          activeHref={activeHref}
+          onItemClick={handleItemClick}
+        />
+        <NavSecondary
+          items={protectedNavSecondary}
+          activeHref={activeHref}
+          onItemClick={handleItemClick}
+          className="mt-auto"
+        />
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={user} />
