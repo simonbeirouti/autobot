@@ -17,7 +17,7 @@ export function WorkspaceSplitLayout({
   return (
     <section className="flex h-full min-h-0 min-w-full -mx-4 -my-4 flex-1 flex-col gap-2 overflow-hidden xl:grid xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]">
       {sidebar}
-      <div className="flex min-h-0 flex-1 flex-col xl:h-full xl:overflow-hidden">{content}</div>
+      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">{content}</div>
     </section>
   );
 }

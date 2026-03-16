@@ -11,6 +11,9 @@ importers:
       '@base-ui/react':
         specifier: ^1.2.0
         version: 1.2.0(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@composio/core':
+        specifier: ^0.6.5
+        version: 0.6.5(ws@8.19.0)(zod@4.3.6)
       '@langchain/anthropic':
         specifier: ^1.3.22
         version: 1.3.22(@langchain/core@1.1.31(openai@6.27.0(ws@8.19.0)(zod@4.3.6)))
@@ -350,6 +353,19 @@ packages:
 
   '@cfworker/json-schema@4.1.1':
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
+
+  '@composio/client@0.1.0-alpha.61':
+    resolution: {integrity: sha512-VSU20mTtMe0TIPHkBBRdCU4IYSy3886U9O69PURU8+ItLXCD2MjIN0S8VTDL8wpA4zFXamUFnvtwQyow11O2KA==}
+
+  '@composio/core@0.6.5':
+    resolution: {integrity: sha512-BHaw60KFkza5PDJDGG2ATaYlwaH5D4VhQinRYo5wLmqjiI/mdnzzXRYatsn24WTaakdqNrf3jY5sQ2WIyex6Ow==}
+    peerDependencies:
+      zod: ^3.25 || ^4
+
+  '@composio/json-schema-to-zod@0.1.20':
+    resolution: {integrity: sha512-d4V34itLrUWG/VBh7ciznKcxF/T22MBLHmuEzHoX0zsBOHsUmjYz5qtDh20S2p3FE+HHvLZxpXiv8yfdd4yI+Q==}
+    peerDependencies:
+      zod: '>=3.25.76 <5'
 
   '@date-fns/tz@1.4.1':
     resolution: {integrity: sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA==}
@@ -3848,6 +3864,9 @@ packages:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
 
+  pusher-js@8.4.0:
+    resolution: {integrity: sha512-wp3HqIIUc1GRyu1XrP6m2dgyE9MoCsXVsWNlohj0rjSkLf+a0jLvEyVubdg58oMk7bhjBWnFClgp8jfAa6Ak4Q==}
+
   qs@6.15.0:
     resolution: {integrity: sha512-mAZTtNCeetKMH+pSjrb76NAM8V9a05I9aBZOHztWy/UqcJdQYNsf59vrRKWnojAT9Y+GbIvoTBC++CPHqpDBhQ==}
     engines: {node: '>=0.6'}
@@ -4312,6 +4331,9 @@ packages:
 
   tw-animate-css@1.4.0:
     resolution: {integrity: sha512-7bziOlRqH0hJx80h/3mbicLW7o8qLsH5+RaLR2t+OHM3D0JlWGODQKQ4cxbK7WlvmUxpcj6Kgu6EKqjrGFe3QQ==}
+
+  tweetnacl@1.0.3:
+    resolution: {integrity: sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==}
 
   type-check@0.4.0:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
@@ -4783,6 +4805,26 @@ snapshots:
       '@types/react': 19.2.14
 
   '@cfworker/json-schema@4.1.1': {}
+
+  '@composio/client@0.1.0-alpha.61': {}
+
+  '@composio/core@0.6.5(ws@8.19.0)(zod@4.3.6)':
+    dependencies:
+      '@composio/client': 0.1.0-alpha.61
+      '@composio/json-schema-to-zod': 0.1.20(zod@4.3.6)
+      '@types/json-schema': 7.0.15
+      chalk: 4.1.2
+      openai: 6.27.0(ws@8.19.0)(zod@4.3.6)
+      pusher-js: 8.4.0
+      semver: 7.7.4
+      zod: 4.3.6
+      zod-to-json-schema: 3.25.1(zod@4.3.6)
+    transitivePeerDependencies:
+      - ws
+
+  '@composio/json-schema-to-zod@0.1.20(zod@4.3.6)':
+    dependencies:
+      zod: 4.3.6
 
   '@date-fns/tz@1.4.1': {}
 
@@ -8295,6 +8337,10 @@ snapshots:
 
   punycode@2.3.1: {}
 
+  pusher-js@8.4.0:
+    dependencies:
+      tweetnacl: 1.0.3
+
   qs@6.15.0:
     dependencies:
       side-channel: 1.1.0
@@ -8933,6 +8979,8 @@ snapshots:
 
   tw-animate-css@1.4.0: {}
 
+  tweetnacl@1.0.3: {}
+
   type-check@0.4.0:
     dependencies:
       prelude-ls: 1.2.1
@@ -9203,7 +9251,6 @@ snapshots:
   zod-to-json-schema@3.25.1(zod@4.3.6):
     dependencies:
       zod: 4.3.6
-    optional: true
 
   zod@3.25.76: {}
 

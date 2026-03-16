@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { DASHBOARD_HOME_ROUTE } from "@/lib/routes";
 
 export function SignUpForm({
   className,
@@ -44,7 +45,7 @@ export function SignUpForm({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
+          emailRedirectTo: `${window.location.origin}${DASHBOARD_HOME_ROUTE}`,
         },
       });
       if (error) throw error;

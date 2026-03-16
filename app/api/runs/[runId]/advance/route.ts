@@ -10,6 +10,7 @@ import {
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import { resolveProjectTools } from "@/lib/tools/resolver";
 
 export async function POST(
   _request: Request,
@@ -24,6 +25,13 @@ export async function POST(
     const { runId } = await context.params;
     const supabase = await createClient();
     const workspace = await fetchWorkspace(supabase, { runId, userId: user.sub });
+    const toolContext =
+      workspace.run.projectId
+        ? await resolveProjectTools(supabase, {
+            projectId: workspace.run.projectId,
+            userId: user.sub,
+          })
+        : null;
 
     if (workspace.run.status === "completed" || workspace.run.status === "failed") {
       return NextResponse.json(workspace);
@@ -37,6 +45,7 @@ export async function POST(
       events: workspace.events,
       usage: workspace.usage,
       finalSummary: workspace.run.finalSummary,
+      activeToolkitSlugs: toolContext?.activeToolkitSlugs ?? [],
     });
 
     await updateTaskStatuses(supabase, {

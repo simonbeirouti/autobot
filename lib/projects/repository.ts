@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fetchLongTermMemoryByProject } from "@/lib/memory/repository";
+import {
+  fetchProjectToolkitSelections,
+  fetchProviderConnections,
+} from "@/lib/tools/repository";
 import type {
   Objective,
   ObjectiveStatus,
@@ -507,7 +511,7 @@ export async function fetchProjectWorkspace(
     threadId?: string | null;
   },
 ): Promise<ProjectWorkspace> {
-  const [project, objectives, assets, threads, recentMemories] = await Promise.all([
+  const [project, objectives, assets, threads, recentMemories, toolkitSelections, providerConnections] = await Promise.all([
     fetchProject(supabase, { projectId: params.projectId, userId: params.userId }),
     fetchObjectives(supabase, { projectId: params.projectId, userId: params.userId }),
     fetchProjectAssets(supabase, { projectId: params.projectId, userId: params.userId }),
@@ -517,6 +521,11 @@ export async function fetchProjectWorkspace(
       projectId: params.projectId,
       limit: 8,
     }),
+    fetchProjectToolkitSelections(supabase, {
+      projectId: params.projectId,
+      userId: params.userId,
+    }),
+    fetchProviderConnections(supabase, { userId: params.userId }),
   ]);
 
   const activeThread = params.threadId
@@ -538,5 +547,7 @@ export async function fetchProjectWorkspace(
     activeThread,
     messages,
     recentMemories,
+    toolkitSelections,
+    providerConnections,
   };
 }

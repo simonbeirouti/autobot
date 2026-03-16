@@ -1,7 +1,7 @@
 import { createStore, del, get, set } from "idb-keyval";
 
 export const QUERY_CACHE_KEY = "autobot-react-query";
-export const QUERY_CACHE_BUSTER = "v1";
+export const QUERY_CACHE_BUSTER = "v3";
 const QUERY_STORE = createStore("autobot-query-db", "query-cache");
 
 export function getQueryCacheStorageKey(cacheScope: string) {

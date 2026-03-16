@@ -34,6 +34,7 @@ import type {
   ProjectChatResponse,
   ProjectChatStreamEvent,
 } from "@/lib/projects/types";
+import { resolveProjectTools } from "@/lib/tools/resolver";
 
 const ProjectChatState = Annotation.Root({
   ...MessagesAnnotation.spec,
@@ -48,6 +49,7 @@ const ProjectChatState = Annotation.Root({
     default: () => null,
   }),
   responseStyle: Annotation<string>({ reducer: (_c, u) => u, default: () => "Clear and direct." }),
+  toolsContextMarkdown: Annotation<string>({ reducer: (_c, u) => u, default: () => "" }),
 });
 
 let projectChatCheckpointerPromise: Promise<BaseCheckpointSaver<number>> | null = null;
@@ -188,6 +190,8 @@ function createProjectChatGraph(checkpointer: Awaited<ReturnType<typeof getProje
           "",
           "Retrieved context:",
           state.memoryContextMarkdown || "No stored memory yet.",
+          "",
+          state.toolsContextMarkdown || "Project tool context: none configured.",
         ].join("\n"),
       ),
       ...state.messages,
@@ -271,6 +275,10 @@ export async function invokeProjectChat(
       message: params.message,
     }),
   ]);
+  const toolContext = await resolveProjectTools(supabase, {
+    projectId: params.project.id,
+    userId: params.userId,
+  });
 
   const citedMemoryIds = collectCitedMemoryIds(memoryContext);
   const result = await graph.invoke(
@@ -282,6 +290,7 @@ export async function invokeProjectChat(
       objectiveDescription: params.objective?.description ?? null,
       memoryContextMarkdown: formatMemoryContext(params.project, memoryContext, params.objective ?? null),
       citedMemoryIds,
+      toolsContextMarkdown: toolContext.markdown,
     },
     { configurable: { thread_id: params.threadId } },
   );
@@ -351,6 +360,10 @@ export async function* streamProjectChat(
       message: params.message,
     }),
   ]);
+  const toolContext = await resolveProjectTools(supabase, {
+    projectId: params.project.id,
+    userId: params.userId,
+  });
 
   const citedMemoryIds = collectCitedMemoryIds(memoryContext);
   let routedAgentId = "orchestrator";
@@ -365,6 +378,7 @@ export async function* streamProjectChat(
       objectiveDescription: params.objective?.description ?? null,
       memoryContextMarkdown: formatMemoryContext(params.project, memoryContext, params.objective ?? null),
       citedMemoryIds,
+      toolsContextMarkdown: toolContext.markdown,
     },
     {
       configurable: { thread_id: params.threadId },

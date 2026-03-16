@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, FolderKanbanIcon } from "lucide-react";
 
 import { useProject } from "@/components/providers/project-provider";
@@ -42,6 +42,11 @@ export function ProjectOnboardingScreen() {
   const [currentStep, setCurrentStep] = useState(0);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  useEffect(() => {
+    setHasHydrated(true);
+  }, []);
 
   const isExistingWorkspace = projects.length > 0;
   const isNameValid = isValidProjectName(name);
@@ -55,6 +60,10 @@ export function ProjectOnboardingScreen() {
       name: trimmedName,
       description: trimmedDescription,
     });
+  }
+
+  if (!hasHydrated) {
+    return <section className="flex min-h-svh flex-1 items-center justify-center bg-background text-sm text-muted-foreground">Loading project setup...</section>;
   }
 
   return (

@@ -93,6 +93,10 @@ const ExecutionGraphState = Annotation.Root({
     reducer: (_current, update) => update,
     default: () => null,
   }),
+  activeToolkitSlugs: Annotation<string[]>({
+    reducer: (_current, update) => update,
+    default: () => [],
+  }),
 });
 
 function normalizeAgentId(agentId?: string): AgentId {
@@ -591,8 +595,23 @@ const executionGraph = new StateGraph(ExecutionGraphState)
         type: "tool",
         agentId,
         message: `tool.execute_task(${selectedTask.title})`,
-        metadata: { taskId: selectedTask.id, tool: "execute_task" },
+        metadata: {
+          taskId: selectedTask.id,
+          tool: "execute_task",
+          activeToolkitSlugs: state.activeToolkitSlugs,
+        },
       }),
+      ...(state.activeToolkitSlugs.length > 0
+        ? [
+            createEvent({
+              runId: state.runId,
+              type: "tool",
+              agentId,
+              message: `Connected toolkits available: ${state.activeToolkitSlugs.join(", ")}`,
+              metadata: { taskId: selectedTask.id, toolkits: state.activeToolkitSlugs },
+            }),
+          ]
+        : []),
     );
 
     nextUsage.push(
@@ -787,6 +806,7 @@ export async function advanceRunExecution(params: {
   events: RunEvent[];
   usage: UsageRecord[];
   finalSummary: string | null;
+  activeToolkitSlugs?: string[];
 }) {
   const result = await executionGraph.invoke({
     runId: params.runId,
@@ -800,6 +820,7 @@ export async function advanceRunExecution(params: {
     newUsage: [],
     selectedTaskId: null,
     selectedAction: null,
+    activeToolkitSlugs: params.activeToolkitSlugs ?? [],
   });
 
   return {

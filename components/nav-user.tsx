@@ -6,7 +6,6 @@ import {
   ChevronsUpDownIcon,
   CreditCardIcon,
   LogOutIcon,
-  SparklesIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -21,7 +20,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -112,35 +110,6 @@ export function NavUser({
             align="end"
             sideOffset={4}
           >
-            <DropdownMenuLabel className="p-0 font-normal">
-              <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarImage src={hydratedUser?.avatar ?? ""} alt={displayName} />
-                  <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  {isReady ? (
-                    <>
-                      <span className="truncate font-medium">{displayName}</span>
-                      <span className="truncate text-xs">{displayEmail}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="mt-1 h-3 w-32" />
-                    </>
-                  )}
-                </div>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem>
-                <SparklesIcon />
-                Upgrade to Pro
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem>
                 <BadgeCheckIcon />

@@ -6,6 +6,7 @@ import {
   Footprints,
   FolderKanbanIcon,
   TerminalSquareIcon,
+  WrenchIcon,
 } from "lucide-react";
 
 export type SidebarNavItem = {
@@ -73,6 +74,11 @@ export const protectedProjects: SidebarProjectItem[] = [
     href: "/dashboard/runs",
     icon: Footprints,
   },
+  {
+    name: "Tools",
+    href: "/dashboard/tools",
+    icon: WrenchIcon,
+  },
 ];
 
 export const protectedRouteTitles: Record<string, string> = {
@@ -80,6 +86,7 @@ export const protectedRouteTitles: Record<string, string> = {
   "/dashboard/drafts": "Drafts",
   "/dashboard/chats": "Chat",
   "/dashboard/runs": "Runs",
+  "/dashboard/tools": "Tools",
 };
 
 function formatSegment(segment: string) {

@@ -16,6 +16,11 @@ export const dashboardQueryKeys = {
     all: (projectId: string) => ["runs", projectId] as const,
     workspace: (runId: string) => ["run-workspace", runId] as const,
   },
+  tools: {
+    catalog: ["tools", "catalog"] as const,
+    toolkit: (toolkitSlug: string) => ["tools", "toolkit", toolkitSlug] as const,
+    onboarding: ["tools", "onboarding"] as const,
+  },
 };
 
 export const dashboardQueryTimings = {
@@ -36,6 +41,12 @@ export const dashboardQueryTimings = {
   },
   runWorkspace: {
     staleTime: 1000 * 15,
+  },
+  tools: {
+    staleTime: 1000 * 60 * 60,
+  },
+  toolOnboarding: {
+    staleTime: 1000 * 60 * 5,
   },
 };
 

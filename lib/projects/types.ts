@@ -1,4 +1,5 @@
 import type { MemoryRecord } from "@/lib/memory/types";
+import type { ProjectToolkitSelection, ProviderConnection } from "@/lib/tools/types";
 
 export const OBJECTIVE_STATUSES = ["draft", "active", "completed", "archived"] as const;
 
@@ -73,6 +74,8 @@ export type ProjectWorkspace = {
   activeThread: ProjectChatThread | null;
   messages: ProjectChatMessage[];
   recentMemories: MemoryRecord[];
+  toolkitSelections: ProjectToolkitSelection[];
+  providerConnections: ProviderConnection[];
 };
 
 export type ProjectChatRequest = {

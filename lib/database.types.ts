@@ -665,6 +665,45 @@ export type Database = {
           },
         ]
       }
+      project_toolkit_selections: {
+        Row: {
+          created_at: string
+          id: string
+          project_id: string
+          toolkit_slug: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          project_id: string
+          toolkit_slug: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          project_id?: string
+          toolkit_slug?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_toolkit_selections_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_toolkit_selections_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       projects: {
         Row: {
           company_key: string
@@ -699,6 +738,68 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "projects_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      provider_connections: {
+        Row: {
+          api_key_last_four: string | null
+          api_key_updated_at: string | null
+          auth_scheme: string | null
+          callback_url: string | null
+          composio_session_id: string | null
+          connected_account_id: string | null
+          created_at: string
+          encrypted_api_key: string | null
+          id: string
+          last_synced_at: string | null
+          redirect_url: string | null
+          status: Database["public"]["Enums"]["toolkit_connection_status"]
+          toolkit_slug: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_key_last_four?: string | null
+          api_key_updated_at?: string | null
+          auth_scheme?: string | null
+          callback_url?: string | null
+          composio_session_id?: string | null
+          connected_account_id?: string | null
+          created_at?: string
+          encrypted_api_key?: string | null
+          id?: string
+          last_synced_at?: string | null
+          redirect_url?: string | null
+          status?: Database["public"]["Enums"]["toolkit_connection_status"]
+          toolkit_slug: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_key_last_four?: string | null
+          api_key_updated_at?: string | null
+          auth_scheme?: string | null
+          callback_url?: string | null
+          composio_session_id?: string | null
+          connected_account_id?: string | null
+          created_at?: string
+          encrypted_api_key?: string | null
+          id?: string
+          last_synced_at?: string | null
+          redirect_url?: string | null
+          status?: Database["public"]["Enums"]["toolkit_connection_status"]
+          toolkit_slug?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_connections_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -864,6 +965,90 @@ export type Database = {
           },
         ]
       }
+      tool_invocations: {
+        Row: {
+          created_at: string
+          id: string
+          input_summary: string | null
+          metadata: Json
+          objective_id: string | null
+          project_id: string | null
+          result_summary: string | null
+          run_id: string | null
+          status: string
+          thread_id: string | null
+          tool_slug: string
+          toolkit_slug: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          input_summary?: string | null
+          metadata?: Json
+          objective_id?: string | null
+          project_id?: string | null
+          result_summary?: string | null
+          run_id?: string | null
+          status: string
+          thread_id?: string | null
+          tool_slug: string
+          toolkit_slug: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          input_summary?: string | null
+          metadata?: Json
+          objective_id?: string | null
+          project_id?: string | null
+          result_summary?: string | null
+          run_id?: string | null
+          status?: string
+          thread_id?: string | null
+          tool_slug?: string
+          toolkit_slug?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tool_invocations_objective_id_fkey"
+            columns: ["objective_id"]
+            isOneToOne: false
+            referencedRelation: "objectives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tool_invocations_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tool_invocations_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tool_invocations_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "project_chat_threads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tool_invocations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       usage_records: {
         Row: {
           agent_id: string | null
@@ -933,12 +1118,74 @@ export type Database = {
           },
         ]
       }
+      user_tool_onboarding: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          selected_toolkit_slugs: string[]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          selected_toolkit_slugs?: string[]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          selected_toolkit_slugs?: string[]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_tool_onboarding_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      save_provider_connection_api_key: {
+        Args: {
+          p_api_key: string
+          p_auth_scheme: string
+          p_encryption_secret: string
+          p_toolkit_slug: string
+        }
+        Returns: {
+          api_key_last_four: string | null
+          api_key_updated_at: string | null
+          auth_scheme: string | null
+          callback_url: string | null
+          composio_session_id: string | null
+          connected_account_id: string | null
+          created_at: string
+          encrypted_api_key: string | null
+          id: string
+          last_synced_at: string | null
+          redirect_url: string | null
+          status: Database["public"]["Enums"]["toolkit_connection_status"]
+          toolkit_slug: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "provider_connections"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       event_type: "system" | "agent" | "tool" | "handoff" | "task"
@@ -964,6 +1211,13 @@ export type Database = {
         | "blocked"
         | "failed"
       task_status: "waiting" | "underway" | "complete"
+      toolkit_connection_status:
+        | "not_connected"
+        | "initiated"
+        | "active"
+        | "failed"
+        | "expired"
+        | "disabled"
       usage_category: "chat" | "tool" | "automation" | "agent_handoff"
       usage_status: "started" | "succeeded" | "failed" | "cancelled"
     }
@@ -1122,6 +1376,14 @@ export const Constants = {
         "failed",
       ],
       task_status: ["waiting", "underway", "complete"],
+      toolkit_connection_status: [
+        "not_connected",
+        "initiated",
+        "active",
+        "failed",
+        "expired",
+        "disabled",
+      ],
       usage_category: ["chat", "tool", "automation", "agent_handoff"],
       usage_status: ["started", "succeeded", "failed", "cancelled"],
     },
