@@ -1,3 +1,5 @@
+import type { ToolkitReadinessItem } from "@/lib/tools/types";
+
 export const RUN_STATUSES = [
   "clarifying",
   "ready",
@@ -21,6 +23,29 @@ export type EventType = (typeof EVENT_TYPES)[number];
 export type UsageCategory = (typeof USAGE_CATEGORIES)[number];
 export type UsageStatus = (typeof USAGE_STATUSES)[number];
 export type ExecutionMode = "single_agent" | "multi_agent";
+export type RunActionRequiredKind =
+  | "tool_authentication"
+  | "manual_setup"
+  | "tool_confirmation"
+  | "manual_pause";
+
+export type RunActionRequired = {
+  kind: RunActionRequiredKind;
+  title: string;
+  body: string;
+  reason: string;
+  requiredToolkitSlugs: string[];
+  readiness: ToolkitReadinessItem[];
+  actionLabel: string | null;
+  actionHref: string | null;
+  resumeLabel: string | null;
+  canResume: boolean;
+  autoResume: boolean;
+  notifiedAt: string | null;
+  emailFallbackAt: string | null;
+  emailEscalatedAt: string | null;
+  resolvedAt: string | null;
+};
 
 export type TranscriptRole = "user" | "assistant";
 
@@ -43,6 +68,7 @@ export type RunRecord = {
   executionMode: ExecutionMode;
   readinessSummary: string | null;
   finalSummary: string | null;
+  actionRequired: RunActionRequired | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -62,6 +88,7 @@ export type RunTask = {
   requiredToolIds: string[];
   executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
   toolSummary: string | null;
+  actionRequired: RunActionRequired | null;
   createdAt: string;
   updatedAt: string;
 };

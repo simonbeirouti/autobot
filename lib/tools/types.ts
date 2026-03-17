@@ -103,6 +103,20 @@ export type ToolExecutionMode = "read" | "write" | "admin";
 
 export type ToolRiskLevel = "low" | "medium" | "high";
 
+export type ToolkitReadinessStatus =
+  | "ready"
+  | "not_selected"
+  | "not_connected"
+  | "missing_session"
+  | "auth_in_progress"
+  | "confirmation_required";
+
+export type ToolkitReadinessItem = {
+  toolkitSlug: string;
+  status: ToolkitReadinessStatus;
+  message: string;
+};
+
 export type ToolInvocationStatus =
   | "started"
   | "succeeded"
@@ -137,7 +151,12 @@ export type ToolRuntimeContext = {
 
 export type ToolRuntimeMissingPrerequisite = {
   toolkitSlug: string;
-  reason: "not_selected" | "not_connected" | "missing_session";
+  reason:
+    | "not_selected"
+    | "not_connected"
+    | "missing_session"
+    | "auth_in_progress"
+    | "confirmation_required";
   message: string;
 };
 

@@ -109,3 +109,34 @@ export async function PATCH(
     );
   }
 }
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ draftId: string }> },
+) {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.sub) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    const { draftId } = await context.params;
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("intake_drafts")
+      .delete()
+      .eq("id", draftId)
+      .eq("user_id", user.sub);
+
+    if (error) {
+      throw error;
+    }
+
+    return NextResponse.json({ success: true as const, draftId });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to delete draft." },
+      { status: 500 },
+    );
+  }
+}

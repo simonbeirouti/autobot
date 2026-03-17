@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { advanceRunWorkspace } from "@/lib/runs/advance";
+import { listBlockedRunsForUser } from "@/lib/runs/repository";
 import { inspectToolkitConnection, isComposioConfigured } from "@/lib/tools/composio";
 import { fetchProviderConnectionByToolkit, upsertProviderConnection } from "@/lib/tools/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
@@ -54,6 +56,25 @@ export async function POST(request: Request) {
       callbackUrl: existingConnection.callbackUrl,
       lastSyncedAt: new Date().toISOString(),
     });
+
+    if (connection.status === "active") {
+      const blockedRuns = await listBlockedRunsForUser(supabase, {
+        userId: user.sub,
+      });
+
+      await Promise.all(
+        blockedRuns
+          .filter((run) => run.actionRequired?.requiredToolkitSlugs.includes(body.toolkitSlug))
+          .map((run) =>
+            advanceRunWorkspace({
+              supabase,
+              user,
+              runId: run.id,
+              force: true,
+            }).catch(() => null),
+          ),
+      );
+    }
 
     return NextResponse.json(connection);
   } catch (error) {

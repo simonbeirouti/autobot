@@ -9,11 +9,13 @@ import {
   KeyRoundIcon,
   Link2Icon,
   LoaderCircleIcon,
+  PanelLeftIcon,
   SearchIcon,
   ShieldCheckIcon,
   XCircleIcon,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +29,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -136,6 +145,20 @@ function readStoredCatalogSnapshot() {
   } catch {
     return null;
   }
+}
+
+function ToolkitToolsSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div className="border bg-card p-4" key={index}>
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="mt-3 h-4 w-full" />
+          <Skeleton className="mt-2 h-4 w-3/4" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function persistCatalogSnapshot(catalog: ComposioToolCatalog | null) {
@@ -492,6 +515,7 @@ export function ToolsDashboardClient({
   );
   const [apiKeyDialogToolkitSlug, setApiKeyDialogToolkitSlug] = useState<string>("");
   const [apiKeyValue, setApiKeyValue] = useState("");
+  const [isCategoryDrawerOpen, setIsCategoryDrawerOpen] = useState(false);
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const connectionResult = searchParams.get("connection");
 
@@ -582,26 +606,50 @@ export function ToolsDashboardClient({
 
   const connectMutation = useMutation({
     mutationFn: startToolkitConnection,
-    onSuccess: (payload) => {
+    onSuccess: (payload, toolkitSlug) => {
+      const toolkitName =
+        catalog?.toolkits.find((toolkit) => toolkit.slug === toolkitSlug)?.name ?? toolkitSlug;
+
       if (payload.redirectUrl) {
+        toast.success(`Redirecting to ${toolkitName} to finish connecting.`);
         window.location.href = payload.redirectUrl;
         return;
       }
 
+      toast.success(`${toolkitName} connection updated.`);
       void queryClient.invalidateQueries({
         queryKey: dashboardQueryKeys.tools.catalog,
       });
+    },
+    onError: (error, toolkitSlug) => {
+      const toolkitName =
+        catalog?.toolkits.find((toolkit) => toolkit.slug === toolkitSlug)?.name ?? toolkitSlug;
+      toast.error(
+        error instanceof Error ? error.message : `Unable to connect ${toolkitName}.`,
+      );
     },
   });
 
   const apiKeyMutation = useMutation({
     mutationFn: saveToolkitApiKey,
-    onSuccess: async () => {
+    onSuccess: async (_, variables) => {
       await queryClient.invalidateQueries({
         queryKey: dashboardQueryKeys.tools.catalog,
       });
       setApiKeyValue("");
       setApiKeyDialogToolkitSlug("");
+      const toolkitName =
+        catalog?.toolkits.find((toolkit) => toolkit.slug === variables.toolkitSlug)?.name ??
+        variables.toolkitSlug;
+      toast.success(`${toolkitName} API key saved.`);
+    },
+    onError: (error, variables) => {
+      const toolkitName =
+        catalog?.toolkits.find((toolkit) => toolkit.slug === variables.toolkitSlug)?.name ??
+        variables.toolkitSlug;
+      toast.error(
+        error instanceof Error ? error.message : `Unable to save API key for ${toolkitName}.`,
+      );
     },
   });
 
@@ -644,6 +692,56 @@ export function ToolsDashboardClient({
   if (catalogQuery.isLoading) {
     return <ToolsDashboardSkeleton />;
   }
+
+  const selectedCategoryName =
+    visibleCategories.find((category) => category.id === selectedCategoryId)?.name ?? "Toolkits";
+
+  const categorySearchField = (
+    <div className="relative">
+      <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        className="pl-9"
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="Search toolkits"
+        value={search}
+      />
+    </div>
+  );
+
+  const categoryList = (
+    <>
+      {catalogQuery.error instanceof Error ? (
+        <div className="border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {catalogQuery.error.message}
+        </div>
+      ) : null}
+
+      {visibleCategories.length > 0 ? (
+        <div className="space-y-2 pb-1">
+          {visibleCategories.map((category) => (
+            <Button
+              className={cn(
+                "h-auto w-full cursor-pointer justify-between border px-4 py-3 text-left text-sm transition-colors",
+                selectedCategoryId === category.id
+                  ? "border-primary bg-muted text-foreground"
+                  : "border-border bg-background text-foreground hover:bg-muted",
+              )}
+              key={category.id}
+              onClick={() => {
+                setSelectedCategoryId(category.id);
+                setIsCategoryDrawerOpen(false);
+              }}
+              type="button"
+              variant="ghost"
+            >
+              <span className="truncate">{category.name}</span>
+              <span className="ml-3 shrink-0 text-xs text-muted-foreground">{category.toolkitCount}</span>
+            </Button>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
 
   return (
     <>
@@ -716,60 +814,44 @@ export function ToolsDashboardClient({
       <ToolsSplitLayout
         sidebar={
           <WorkspaceSidebarPanel
-            className="min-h-[260px] max-h-[40vh] sm:min-h-[320px] sm:max-h-[45vh] lg:min-h-0 lg:max-h-none"
+            className="hidden min-h-[260px] max-h-[40vh] sm:min-h-[320px] sm:max-h-[45vh] lg:flex lg:min-h-0 lg:max-h-none"
             description="Choose a category to browse its toolkits."
-            headerAction={
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search toolkits"
-                  value={search}
-                />
-              </div>
-            }
+            headerAction={categorySearchField}
             headerActionFullWidth
             title="Categories"
           >
-            {catalogQuery.error instanceof Error ? (
-              <div className="border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                {catalogQuery.error.message}
-              </div>
-            ) : null}
-
-            {visibleCategories.length > 0 ? (
-              <div className="space-y-2 pb-1">
-                {visibleCategories.map((category) => (
-                  <Button
-                    className={cn(
-                      "h-auto w-full cursor-pointer justify-between border px-4 py-3 text-left text-sm transition-colors",
-                      selectedCategoryId === category.id
-                        ? "border-primary bg-muted text-foreground"
-                        : "border-border bg-background text-foreground hover:bg-muted",
-                    )}
-                    key={category.id}
-                    onClick={() => setSelectedCategoryId(category.id)}
-                    type="button"
-                    variant="ghost"
-                  >
-                    <span className="truncate">{category.name}</span>
-                    <span className="ml-3 shrink-0 text-xs text-muted-foreground">{category.toolkitCount}</span>
-                  </Button>
-                ))}
-              </div>
-            ) : null}
+            {categoryList}
           </WorkspaceSidebarPanel>
         }
         content={
           <div className="flex h-full min-h-0 flex-col overflow-hidden border bg-background">
+            <div className="shrink-0 border-b px-4 py-3 lg:hidden">
+              <Button
+                className="h-auto w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                onClick={() => setIsCategoryDrawerOpen(true)}
+                type="button"
+                variant="outline"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <PanelLeftIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0">
+                    <span className="block text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      Categories
+                    </span>
+                    <span className="block truncate text-sm font-medium">{selectedCategoryName}</span>
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {visibleCategories.length}
+                </span>
+              </Button>
+            </div>
+
             {selectedCategoryId ? (
               <>
                 <div className="shrink-0 border-b px-4 py-4">
                   <div className="space-y-1">
-                    <h1 className="text-lg font-semibold">
-                      {visibleCategories.find((category) => category.id === selectedCategoryId)?.name ?? "Toolkits"}
-                    </h1>
+                    <h1 className="text-lg font-semibold">{selectedCategoryName}</h1>
                     <p className="text-sm text-muted-foreground">
                       Browse matching toolkits and open a card to inspect its tools.
                     </p>
@@ -858,6 +940,21 @@ export function ToolsDashboardClient({
         }
       />
 
+      <Drawer onOpenChange={setIsCategoryDrawerOpen} open={isCategoryDrawerOpen}>
+        <DrawerContent className="lg:hidden">
+          <DrawerHeader className="text-left">
+            <DrawerTitle>Categories</DrawerTitle>
+            <DrawerDescription>Choose a category to browse its toolkits.</DrawerDescription>
+          </DrawerHeader>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-4">
+            {categorySearchField}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {categoryList}
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
       <Sheet onOpenChange={(open) => !open && setOpenToolkitSlug("")} open={Boolean(selectedToolkit)}>
         <SheetContent className="flex w-[94vw] flex-col sm:max-w-2xl" side="right">
           {selectedToolkit ? (
@@ -905,15 +1002,7 @@ export function ToolsDashboardClient({
                   </article>
 
                   {toolsQuery.isLoading ? (
-                    <div className="space-y-2">
-                      {Array.from({ length: 6 }).map((_, index) => (
-                        <div className="border bg-card p-4" key={index}>
-                          <Skeleton className="h-5 w-40" />
-                          <Skeleton className="mt-3 h-4 w-full" />
-                          <Skeleton className="mt-2 h-4 w-3/4" />
-                        </div>
-                      ))}
-                    </div>
+                    <ToolkitToolsSkeleton />
                   ) : toolsQuery.error instanceof Error ? (
                     <div className="border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                       {toolsQuery.error.message}

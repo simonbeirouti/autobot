@@ -24,6 +24,10 @@ function isPersistedQuery(query: Query) {
     return false;
   }
 
+  if (namespace === "projects" || namespace === "project-workspace") {
+    return false;
+  }
+
   return true;
 }
 

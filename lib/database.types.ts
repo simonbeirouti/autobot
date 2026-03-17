@@ -119,6 +119,53 @@ export type Database = {
           },
         ]
       }
+      feedback_submissions: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          score: number
+          title: string
+          type: Database["public"]["Enums"]["feedback_submission_type"]
+          updated_at: string
+          user_email: string | null
+          user_id: string
+          user_name: string | null
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          id?: string
+          score: number
+          title: string
+          type: Database["public"]["Enums"]["feedback_submission_type"]
+          updated_at?: string
+          user_email?: string | null
+          user_id: string
+          user_name?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          score?: number
+          title?: string
+          type?: Database["public"]["Enums"]["feedback_submission_type"]
+          updated_at?: string
+          user_email?: string | null
+          user_id?: string
+          user_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feedback_submissions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       intake_drafts: {
         Row: {
           clarification_summary: string | null
@@ -363,6 +410,103 @@ export type Database = {
           },
           {
             foreignKeyName: "memory_records_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_preferences: {
+        Row: {
+          created_at: string
+          marketing_email: boolean
+          platform_updates_email: boolean
+          platform_updates_in_app: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          marketing_email?: boolean
+          platform_updates_email?: boolean
+          platform_updates_in_app?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          marketing_email?: boolean
+          platform_updates_email?: boolean
+          platform_updates_in_app?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_preferences_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          action_href: string | null
+          action_label: string | null
+          body: string
+          category: string
+          channel: string
+          created_at: string
+          dedupe_key: string | null
+          dismissed_at: string | null
+          href: string | null
+          id: string
+          kind: string
+          metadata: Json
+          read_at: string | null
+          title: string
+          user_id: string
+        }
+        Insert: {
+          action_href?: string | null
+          action_label?: string | null
+          body: string
+          category: string
+          channel: string
+          created_at?: string
+          dedupe_key?: string | null
+          dismissed_at?: string | null
+          href?: string | null
+          id?: string
+          kind: string
+          metadata?: Json
+          read_at?: string | null
+          title: string
+          user_id: string
+        }
+        Update: {
+          action_href?: string | null
+          action_label?: string | null
+          body?: string
+          category?: string
+          channel?: string
+          created_at?: string
+          dedupe_key?: string | null
+          dismissed_at?: string | null
+          href?: string | null
+          id?: string
+          kind?: string
+          metadata?: Json
+          read_at?: string | null
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -862,6 +1006,7 @@ export type Database = {
       }
       run_tasks: {
         Row: {
+          action_required: Json | null
           agent_id: string | null
           agent_label: string | null
           created_at: string
@@ -873,11 +1018,12 @@ export type Database = {
           required_toolkit_slugs: string[]
           run_id: string
           status: Database["public"]["Enums"]["task_status"]
-          tool_summary: string | null
           title: string
+          tool_summary: string | null
           updated_at: string
         }
         Insert: {
+          action_required?: Json | null
           agent_id?: string | null
           agent_label?: string | null
           created_at?: string
@@ -889,11 +1035,12 @@ export type Database = {
           required_toolkit_slugs?: string[]
           run_id: string
           status?: Database["public"]["Enums"]["task_status"]
-          tool_summary?: string | null
           title: string
+          tool_summary?: string | null
           updated_at?: string
         }
         Update: {
+          action_required?: Json | null
           agent_id?: string | null
           agent_label?: string | null
           created_at?: string
@@ -905,8 +1052,8 @@ export type Database = {
           required_toolkit_slugs?: string[]
           run_id?: string
           status?: Database["public"]["Enums"]["task_status"]
-          tool_summary?: string | null
           title?: string
+          tool_summary?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -921,6 +1068,7 @@ export type Database = {
       }
       runs: {
         Row: {
+          action_required: Json | null
           created_at: string
           execution_mode: string
           final_summary: string | null
@@ -935,6 +1083,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          action_required?: Json | null
           created_at?: string
           execution_mode: string
           final_summary?: string | null
@@ -949,6 +1098,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          action_required?: Json | null
           created_at?: string
           execution_mode?: string
           final_summary?: string | null
@@ -1210,6 +1360,7 @@ export type Database = {
     }
     Enums: {
       event_type: "system" | "agent" | "tool" | "handoff" | "task"
+      feedback_submission_type: "feedback" | "feature_request"
       intake_draft_status:
         | "collecting_input"
         | "review_ready"
@@ -1373,6 +1524,7 @@ export const Constants = {
   public: {
     Enums: {
       event_type: ["system", "agent", "tool", "handoff", "task"],
+      feedback_submission_type: ["feedback", "feature_request"],
       intake_draft_status: [
         "collecting_input",
         "review_ready",
@@ -1389,6 +1541,7 @@ export const Constants = {
       ],
       memory_scope: ["company", "project", "objective", "user"],
       objective_status: ["draft", "active", "completed", "archived"],
+      project_status: ["active", "archived", "deleted"],
       run_status: [
         "clarifying",
         "ready",
@@ -1411,3 +1564,4 @@ export const Constants = {
     },
   },
 } as const
+

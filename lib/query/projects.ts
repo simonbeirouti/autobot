@@ -3,6 +3,7 @@
 import { startTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { useAuth } from "@/components/providers/auth-provider";
 import { useProject } from "@/components/providers/project-provider";
@@ -59,9 +60,13 @@ export function useCreateProjectMutation() {
         (current) => upsertProjectInList(current, project),
       );
       setActiveProjectId(project.id);
+      toast.success(`${project.name} created and set as your current project.`);
       startTransition(() => {
         router.replace(DASHBOARD_HOME_ROUTE);
       });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Unable to create project.");
     },
   });
 }
@@ -96,6 +101,7 @@ export function useManageProjectsQuery() {
     queryKey: dashboardQueryKeys.projects.management,
     queryFn: () => fetchJson<Project[]>("/api/projects?includeArchived=true"),
     enabled: Boolean(user?.id),
+    refetchOnMount: "always",
     staleTime: dashboardQueryTimings.projects.staleTime,
   });
 }

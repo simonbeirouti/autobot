@@ -1,6 +1,10 @@
+import { randomUUID } from "crypto";
+
 import { NextResponse } from "next/server";
 
 import { buildInitialRunPayload } from "@/lib/agents/orchestrator";
+import { buildToolAuthActionRequired, sendRunBlockedInAppNotification } from "@/lib/runs/action-required";
+import type { RunActionRequired } from "@/lib/runs/types";
 import { writeLongTermMemory } from "@/lib/memory/repository";
 import { resolveCompanyKey } from "@/lib/projects/context";
 import { createObjective, updateObjective } from "@/lib/projects/repository";
@@ -12,10 +16,33 @@ import {
   insertRunEvents,
   insertRunTasks,
   insertUsageRecords,
+  updateRunStatus,
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { resolveProjectToolRuntime } from "@/lib/tools/runtime";
+import { buildMissingToolkitChecklist, resolveProjectToolRuntime } from "@/lib/tools/runtime";
+
+function reindexTasks<T extends { position: number }>(tasks: T[]) {
+  return tasks.map((task, index) => ({
+    ...task,
+    position: index,
+  }));
+}
+
+type RunTaskRecord = {
+  runId: string;
+  title: string;
+  description: string | null;
+  status: "waiting" | "underway" | "complete";
+  position: number;
+  agentId: string | null;
+  agentLabel: string | null;
+  requiredToolkitSlugs: string[];
+  requiredToolIds: string[];
+  executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
+  toolSummary: string | null;
+  actionRequired?: RunActionRequired | null;
+};
 
 export async function POST(
   _request: Request,
@@ -139,7 +166,49 @@ export async function POST(
       role: "assistant",
       content: `Execution confirmed.\n\n${draft.draftMarkdown ?? draft.generatedMarkdown ?? draft.clarificationSummary ?? ""}`,
     });
-    await insertRunTasks(supabase, initialPayload.tasks);
+
+    let actionRequired: RunActionRequired | null = null;
+    let taskRecords: RunTaskRecord[] = initialPayload.tasks;
+
+    if (toolRuntime.missingPrerequisites.length > 0) {
+      actionRequired = buildToolAuthActionRequired({
+        runId: run.id,
+        readiness: toolRuntime.missingPrerequisites.map((item) => ({
+          toolkitSlug: item.toolkitSlug,
+          status: item.reason,
+          message: item.message,
+        })),
+        title: "Connect tools to start this run",
+        body: "This run is ready, but it needs provider authentication or setup before execution can begin.",
+      });
+
+      const setupTasks = buildMissingToolkitChecklist(toolRuntime).map((item) => ({
+        id: randomUUID(),
+        runId: run.id,
+        title: item.title,
+        description: item.description,
+        status: "waiting" as const,
+        position: 0,
+        agentId: "operator" as const,
+        agentLabel: "Operator" as const,
+        requiredToolkitSlugs: [item.toolkitSlug],
+        requiredToolIds: [] as string[],
+        executionStrategy: "manual_setup" as const,
+        toolSummary: item.description,
+        actionRequired,
+      }));
+
+      taskRecords = reindexTasks([
+        ...setupTasks,
+        ...initialPayload.tasks.map((task) => ({
+          ...task,
+          status: "waiting" as const,
+          actionRequired,
+        })),
+      ]);
+    }
+
+    await insertRunTasks(supabase, taskRecords);
     await insertRunEvents(supabase, initialPayload.events);
     await insertUsageRecords(supabase, user.sub, [
       ...initialPayload.usage,
@@ -158,6 +227,15 @@ export async function POST(
       },
     ]);
 
+    if (actionRequired) {
+      await updateRunStatus(supabase, {
+        runId: run.id,
+        userId: user.sub,
+        status: "blocked",
+        actionRequired,
+      });
+    }
+
     await updateIntakeDraft(supabase, {
       draftId,
       userId: user.sub,
@@ -170,26 +248,69 @@ export async function POST(
       },
     });
 
-    await writeLongTermMemory(supabase, {
-      userId: user.sub,
-      companyKey,
-      projectId: draft.projectId,
-      objectiveId: objective.id,
-      scope: "objective",
-      kind: "objective",
-      sourceType: "draft_execution",
-      sourceId: draft.id,
-      summary: draft.clarificationSummary ?? `Execution objective for ${objective.title}`,
-      content: draft.draftMarkdown ?? draft.generatedMarkdown ?? draft.objective,
-      metadata: {
-        draftId: draft.id,
-        runId: run.id,
+    if (actionRequired) {
+      try {
+        await sendRunBlockedInAppNotification(supabase, {
+          userId: user.sub,
+          runId: run.id,
+          objective: run.objective,
+          actionRequired,
+        });
+
+        actionRequired = {
+          ...actionRequired,
+          notifiedAt: new Date().toISOString(),
+        };
+
+        await updateRunStatus(supabase, {
+          runId: run.id,
+          userId: user.sub,
+          status: "blocked",
+          actionRequired,
+        });
+      } catch (notificationError) {
+        console.error("Unable to send blocked-run notification after draft execution", {
+          error: notificationError,
+          draftId,
+          runId: run.id,
+          userId: user.sub,
+        });
+      }
+    }
+
+    try {
+      await writeLongTermMemory(supabase, {
+        userId: user.sub,
+        companyKey,
         projectId: draft.projectId,
         objectiveId: objective.id,
-      },
-    });
+        scope: "objective",
+        kind: "objective",
+        sourceType: "draft_execution",
+        sourceId: draft.id,
+        summary: draft.clarificationSummary ?? `Execution objective for ${objective.title}`,
+        content: draft.draftMarkdown ?? draft.generatedMarkdown ?? draft.objective,
+        metadata: {
+          draftId: draft.id,
+          runId: run.id,
+          projectId: draft.projectId,
+          objectiveId: objective.id,
+        },
+      });
+    } catch (memoryError) {
+      console.error("Unable to persist draft execution memory", {
+        error: memoryError,
+        draftId,
+        runId: run.id,
+        userId: user.sub,
+      });
+    }
 
-    return NextResponse.json({ runId: run.id });
+    return NextResponse.json({
+      runId: run.id,
+      runStatus: actionRequired ? "blocked" : run.status,
+      actionRequired,
+    });
   } catch (error) {
     console.error("POST /api/intake/drafts/[draftId]/execute failed", error);
     return NextResponse.json(

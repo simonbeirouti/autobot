@@ -18,6 +18,7 @@ create table if not exists public.run_tasks (
   required_tool_ids text[] not null default '{}'::text[],
   execution_strategy text not null default 'analysis_only',
   tool_summary text,
+  action_required jsonb,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );

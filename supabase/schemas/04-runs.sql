@@ -14,6 +14,7 @@ create table if not exists public.runs (
   execution_mode text not null check (execution_mode in ('single_agent', 'multi_agent')),
   readiness_summary text,
   final_summary text,
+  action_required jsonb,
   project_id uuid,
   objective_id uuid,
   created_at timestamptz not null default timezone('utc', now()),

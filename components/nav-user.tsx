@@ -5,6 +5,7 @@ import {
   CogIcon,
   LogOutIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -109,9 +110,11 @@ export function NavUser({
             sideOffset={4}
           >
             <DropdownMenuGroup>
-              <DropdownMenuItem>
-                <CogIcon />
-                Settings
+              <DropdownMenuItem asChild>
+                <Link href="/settings">
+                  <CogIcon />
+                  Settings
+                </Link>
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

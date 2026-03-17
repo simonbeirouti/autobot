@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { advanceRunWorkspace } from "@/lib/runs/advance";
+import { listBlockedRunsForUser } from "@/lib/runs/repository";
 import { inspectToolkitConnection, isComposioConfigured } from "@/lib/tools/composio";
 import { fetchProviderConnectionByToolkit, upsertProviderConnection } from "@/lib/tools/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
       toolkitSlug,
     });
 
-    await upsertProviderConnection(supabase, {
+    const connection = await upsertProviderConnection(supabase, {
       userId: user.sub,
       toolkitSlug,
       composioSessionId: existingConnection.composioSessionId,
@@ -53,8 +55,27 @@ export async function GET(request: Request) {
       lastSyncedAt: new Date().toISOString(),
     });
 
+    if (connection.status === "active") {
+      const blockedRuns = await listBlockedRunsForUser(supabase, {
+        userId: user.sub,
+      });
+
+      await Promise.all(
+        blockedRuns
+          .filter((run) => run.actionRequired?.requiredToolkitSlugs.includes(toolkitSlug))
+          .map((run) =>
+            advanceRunWorkspace({
+              supabase,
+              user,
+              runId: run.id,
+              force: true,
+            }).catch(() => null),
+          ),
+      );
+    }
+
     redirectUrl.searchParams.set("toolkit", toolkitSlug);
-    redirectUrl.searchParams.set("connection", result.status);
+    redirectUrl.searchParams.set("connection", connection.status);
     return NextResponse.redirect(redirectUrl);
   } catch {
     redirectUrl.searchParams.set("connection", "error");

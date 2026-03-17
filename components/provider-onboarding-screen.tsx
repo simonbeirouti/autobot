@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, CheckCircle2Icon, Link2Icon, RefreshCcwIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,6 +43,7 @@ export function ProviderOnboardingScreen() {
 
   const connectionStatus = searchParams.get("connection");
   const connectionToolkit = searchParams.get("toolkit");
+  const nextPath = searchParams.get("next") ?? "/onboarding/providers";
   const payload = onboardingQuery.data;
   const effectiveSelectedToolkitSlugs = selectedToolkitSlugs ?? payload?.onboarding?.selectedToolkitSlugs ?? payload?.defaultToolkitSlugs ?? [];
 
@@ -52,13 +54,25 @@ export function ProviderOnboardingScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           toolkitSlug,
-          nextPath: "/onboarding/providers",
+          nextPath,
         }),
       }),
-    onSuccess: (result) => {
+    onSuccess: (result, toolkitSlug) => {
+      const toolkitName =
+        payload?.recommendedToolkits.find((toolkit) => toolkit.slug === toolkitSlug)?.title ??
+        toolkitSlug;
       if (result.redirectUrl) {
+        toast.success(`Redirecting to ${toolkitName} to finish connecting.`);
         window.location.href = result.redirectUrl;
       }
+    },
+    onError: (error, toolkitSlug) => {
+      const toolkitName =
+        payload?.recommendedToolkits.find((toolkit) => toolkit.slug === toolkitSlug)?.title ??
+        toolkitSlug;
+      toast.error(
+        error instanceof Error ? error.message : `Unable to start ${toolkitName} connection.`,
+      );
     },
   });
 
@@ -71,6 +85,12 @@ export function ProviderOnboardingScreen() {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.tools.onboarding });
+      toast.success("Provider connection status refreshed.");
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to refresh provider connection.",
+      );
     },
   });
 
@@ -86,9 +106,15 @@ export function ProviderOnboardingScreen() {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.tools.onboarding });
+      toast.success("Provider onboarding saved.");
       startTransition(() => {
         router.replace(projects.length === 0 ? PROJECT_ONBOARDING_ROUTE : DASHBOARD_HOME_ROUTE);
       });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to finish provider onboarding.",
+      );
     },
   });
 

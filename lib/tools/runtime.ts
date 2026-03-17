@@ -16,6 +16,8 @@ import type {
   ProviderConnection,
   ResolvedProjectToolRuntime,
   ResolvedToolCandidate,
+  ToolkitReadinessItem,
+  ToolkitReadinessStatus,
   ToolExecutionMode,
   ToolExecutionResult,
   ToolRiskLevel,
@@ -171,6 +173,70 @@ async function searchToolkitTools(params: {
   return candidates;
 }
 
+function buildReadinessMessage(toolkitSlug: string, status: ToolkitReadinessStatus) {
+  switch (status) {
+    case "ready":
+      return `${toolkitSlug} is connected and ready to use.`;
+    case "missing_session":
+      return `${toolkitSlug} is connected but missing a Composio session for execution.`;
+    case "auth_in_progress":
+      return `${toolkitSlug} is waiting for authentication to complete.`;
+    case "confirmation_required":
+      return `${toolkitSlug} needs confirmation before write actions can continue.`;
+    case "not_connected":
+    default:
+      return `${toolkitSlug} is selected for this project but not connected yet.`;
+  }
+}
+
+function resolveToolkitReadinessStatus(
+  connection: ProviderConnection | undefined,
+): ToolkitReadinessStatus {
+  if (!connection) {
+    return "not_connected";
+  }
+
+  if (connection.status === "initiated") {
+    return "auth_in_progress";
+  }
+
+  if (connection.status !== "active") {
+    return "not_connected";
+  }
+
+  if (!connection.composioSessionId) {
+    return "missing_session";
+  }
+
+  return "ready";
+}
+
+export function resolveToolkitReadiness(params: {
+  selectedToolkitSlugs: string[];
+  providerConnections: ProviderConnection[];
+}) {
+  const latestByToolkit = new Map<string, ProviderConnection>();
+
+  for (const connection of params.providerConnections) {
+    if (!latestByToolkit.has(connection.toolkitSlug)) {
+      latestByToolkit.set(connection.toolkitSlug, connection);
+    }
+  }
+
+  const readiness = params.selectedToolkitSlugs.map<ToolkitReadinessItem>((toolkitSlug) => {
+    const connection = latestByToolkit.get(toolkitSlug);
+    const status = resolveToolkitReadinessStatus(connection);
+
+    return {
+      toolkitSlug,
+      status,
+      message: buildReadinessMessage(toolkitSlug, status),
+    };
+  });
+
+  return readiness;
+}
+
 export async function resolveProjectToolRuntime(
   supabase: SupabaseClient,
   params: {
@@ -189,6 +255,10 @@ export async function resolveProjectToolRuntime(
   const providerConnections = await fetchProviderConnections(supabase, {
     userId: params.userId,
   });
+  const readiness = resolveToolkitReadiness({
+    selectedToolkitSlugs: base.selectedToolkitSlugs,
+    providerConnections,
+  });
 
   const activeConnections = providerConnections.filter(
     (connection) =>
@@ -196,20 +266,13 @@ export async function resolveProjectToolRuntime(
       connection.status === "active",
   );
 
-  const missingPrerequisites = [
-    ...base.inactiveToolkitSlugs.map((toolkitSlug) => ({
-      toolkitSlug,
-      reason: "not_connected" as const,
-      message: `${toolkitSlug} is selected for this project but not connected yet.`,
-    })),
-    ...activeConnections
-      .filter((connection) => !connection.composioSessionId)
-      .map((connection) => ({
-        toolkitSlug: connection.toolkitSlug,
-        reason: "missing_session" as const,
-        message: `${connection.toolkitSlug} is connected but missing a Composio session for execution.`,
-      })),
-  ];
+  const missingPrerequisites = readiness
+    .filter((item) => item.status !== "ready")
+    .map((item) => ({
+      toolkitSlug: item.toolkitSlug,
+      reason: item.status as Exclude<typeof item.status, "ready">,
+      message: item.message,
+    }));
 
   if (!params.query?.trim()) {
     return {

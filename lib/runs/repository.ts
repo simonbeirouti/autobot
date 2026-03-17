@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ClarificationMessage,
   RunEvent,
+  RunActionRequired,
   RunListItem,
   RunRecord,
   RunTask,
@@ -78,7 +79,7 @@ export async function fetchRuns(
   let query = supabase
     .from("runs")
     .select(
-      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at",
+      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
     )
     .eq("user_id", params.userId)
     .order("updated_at", { ascending: false });
@@ -103,7 +104,7 @@ export async function fetchLatestRunBySessionId(
   const { data, error } = await supabase
     .from("runs")
     .select(
-      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at",
+      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
     )
     .eq("session_id", params.sessionId)
     .eq("user_id", params.userId)
@@ -128,6 +129,7 @@ export async function createRun(
     objective: string;
     executionMode: ExecutionMode;
     readinessSummary: string;
+    actionRequired?: RunActionRequired | null;
   },
 ) {
   const { data, error } = await supabase
@@ -141,8 +143,9 @@ export async function createRun(
       status: "ready",
       execution_mode: params.executionMode,
       readiness_summary: params.readinessSummary,
+      action_required: params.actionRequired ?? null,
     })
-    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at")
+    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at")
     .single();
 
   if (error) {
@@ -166,6 +169,7 @@ export async function insertRunTasks(
     requiredToolIds: string[];
     executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
     toolSummary: string | null;
+    actionRequired?: RunActionRequired | null;
   }>,
 ) {
   if (tasks.length === 0) {
@@ -185,6 +189,7 @@ export async function insertRunTasks(
         required_tool_ids: task.requiredToolIds,
         execution_strategy: task.executionStrategy,
         tool_summary: task.toolSummary,
+        action_required: task.actionRequired ?? null,
       })),
   );
 
@@ -232,8 +237,28 @@ export async function insertUsageRecords(
     return;
   }
 
+  const normalizeTimestamp = (value: string | null | undefined) => {
+    if (typeof value !== "string") {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+
+    return parsed.toISOString();
+  };
+
   const { error } = await supabase.from("usage_records").insert(
     usageRecords.map((record) => {
+      const startedAt = normalizeTimestamp(record.startedAt) ?? new Date().toISOString();
+      const finishedAt = normalizeTimestamp(record.finishedAt);
       const row = {
         run_id: record.runId,
         session_id: record.sessionId,
@@ -247,8 +272,8 @@ export async function insertUsageRecords(
         token_count: record.tokenCount,
         latency_ms: record.latencyMs,
         cost_estimate: record.costEstimate,
-        ...(record.startedAt !== undefined ? { started_at: record.startedAt } : {}),
-        ...(record.finishedAt !== undefined ? { finished_at: record.finishedAt } : {}),
+        started_at: startedAt,
+        ...(record.finishedAt !== undefined && finishedAt ? { finished_at: finishedAt } : {}),
       };
 
       return row;
@@ -266,7 +291,7 @@ export async function fetchWorkspace(
 ) {
   const { data: runRow, error: runError } = await supabase
     .from("runs")
-    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at")
+    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at")
     .eq("id", params.runId)
     .eq("user_id", params.userId)
     .single();
@@ -279,7 +304,7 @@ export async function fetchWorkspace(
     await Promise.all([
       supabase
         .from("run_tasks")
-        .select("id, run_id, title, description, status, position, agent_id, agent_label, required_toolkit_slugs, required_tool_ids, execution_strategy, tool_summary, created_at, updated_at")
+        .select("id, run_id, title, description, status, position, agent_id, agent_label, required_toolkit_slugs, required_tool_ids, execution_strategy, tool_summary, action_required, created_at, updated_at")
         .eq("run_id", params.runId)
         .order("position", { ascending: true }),
       supabase
@@ -319,6 +344,7 @@ export async function updateRunStatus(
     userId: string;
     status: RunStatus;
     finalSummary?: string | null;
+    actionRequired?: RunActionRequired | null;
   },
 ) {
   const payload: Record<string, unknown> = {
@@ -327,6 +353,9 @@ export async function updateRunStatus(
 
   if (params.finalSummary !== undefined) {
     payload.final_summary = params.finalSummary;
+  }
+  if (params.actionRequired !== undefined) {
+    payload.action_required = params.actionRequired;
   }
 
   const { error } = await supabase
@@ -359,6 +388,7 @@ export async function updateTaskStatuses(
         required_tool_ids: task.requiredToolIds,
         execution_strategy: task.executionStrategy,
         tool_summary: task.toolSummary,
+        action_required: task.actionRequired ?? null,
       })
       .eq("id", task.id)
       .eq("run_id", params.runId);
@@ -403,12 +433,33 @@ export async function syncRunTasks(
       required_tool_ids: task.requiredToolIds,
       execution_strategy: task.executionStrategy,
       tool_summary: task.toolSummary,
+      action_required: task.actionRequired ?? null,
     })),
   );
 
   if (error) {
     throw error;
   }
+}
+
+export async function listBlockedRunsForUser(
+  supabase: SupabaseClient,
+  params: { userId: string },
+) {
+  const { data, error } = await supabase
+    .from("runs")
+    .select(
+      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
+    )
+    .eq("user_id", params.userId)
+    .eq("status", "blocked")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapRun);
 }
 
 function mapRun(row: {
@@ -421,6 +472,7 @@ function mapRun(row: {
   execution_mode: ExecutionMode;
   readiness_summary: string | null;
   final_summary: string | null;
+  action_required?: RunActionRequired | null;
   created_at: string;
   updated_at: string;
 }): RunRecord {
@@ -434,6 +486,7 @@ function mapRun(row: {
     executionMode: row.execution_mode,
     readinessSummary: row.readiness_summary,
     finalSummary: row.final_summary,
+    actionRequired: row.action_required ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -452,6 +505,7 @@ function mapTask(row: {
   required_tool_ids: string[] | null;
   execution_strategy: "manual_setup" | "tool_execution" | "analysis_only";
   tool_summary: string | null;
+  action_required: RunActionRequired | null;
   created_at: string;
   updated_at: string;
 }) {
@@ -468,6 +522,7 @@ function mapTask(row: {
     requiredToolIds: row.required_tool_ids ?? [],
     executionStrategy: row.execution_strategy,
     toolSummary: row.tool_summary,
+    actionRequired: row.action_required ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

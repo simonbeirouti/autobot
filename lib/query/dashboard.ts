@@ -3,6 +3,10 @@ import type { Project, ProjectWorkspace } from "@/lib/projects/types";
 import type { RunListItem, WorkspacePayload } from "@/lib/runs/types";
 
 export const dashboardQueryKeys = {
+  notifications: {
+    all: ["notifications", "inbox"] as const,
+    preferences: ["notifications", "preferences"] as const,
+  },
   drafts: {
     all: (projectId: string) => ["drafts", projectId] as const,
     flow: (draftId: string) => ["draft-flow", draftId] as const,
@@ -25,6 +29,9 @@ export const dashboardQueryKeys = {
 };
 
 export const dashboardQueryTimings = {
+  notifications: {
+    staleTime: 1000 * 15,
+  },
   drafts: {
     staleTime: 1000 * 60,
   },

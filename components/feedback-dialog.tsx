@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -86,9 +87,17 @@ export function FeedbackDialog({
     onSuccess: () => {
       setError(null);
       setForm(createInitialState());
+      toast.success(
+        form.type === "feedback" ? "Feedback submitted." : "Feature request submitted.",
+      );
       onOpenChange(false);
     },
     onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "Unable to submit feedback right now.",
+      );
       setError(
         mutationError instanceof Error
           ? mutationError.message

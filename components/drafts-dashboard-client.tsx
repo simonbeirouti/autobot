@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import type { MouseEvent } from "react";
 import { startTransition, useDeferredValue, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Clock3Icon, FileTextIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, Clock3Icon, FileTextIcon, PanelLeftIcon, Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
 
 import { MarkdownPreview } from "@/components/markdown-preview";
 import { useProject } from "@/components/providers/project-provider";
@@ -24,6 +26,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer";
 import {
   Empty,
   EmptyDescription,
@@ -58,6 +68,9 @@ import { cn } from "@/lib/utils";
 type DraftWorkspaceMode = "questions" | "review";
 type QuestionResponse = IntakeQuestion["response"];
 const ERROR_VISIBILITY_DELAY_MS = 1000;
+const OBJECTIVE_START_SUCCESS_STORAGE_KEY = "autobot-objective-intake-started";
+const DRAFT_SUMMARY_FALLBACK =
+  "Answer the next decisions so AutoBot can generate the draft plan.";
 
 function getTimestamp(value: string | null | undefined) {
   if (!value) {
@@ -175,10 +188,16 @@ async function fetchDraftFlow(draftId: string) {
   return fetchJson<IntakeFlowResponse>(`/api/intake/drafts/${draftId}`);
 }
 
+async function deleteDraft(draftId: string) {
+  return fetchJson<{ success: true; draftId: string }>(`/api/intake/drafts/${draftId}`, {
+    method: "DELETE",
+  });
+}
+
 function DraftWorkspaceSkeleton() {
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_minmax(0,1fr)] xl:overflow-hidden">
-      <Card className="overflow-hidden border-none">
+      <Card className="hidden overflow-hidden border-none xl:block">
         <CardHeader className="-mt-2 space-y-3">
           <Skeleton className="h-8 w-1/2" />
           <Skeleton className="h-4 w-full" />
@@ -216,6 +235,88 @@ function DraftWorkspaceSkeleton() {
         </Card>
       </div>
     </section>
+  );
+}
+
+function getDraftWorkspaceSummary(draft: Pick<IntakeDraft, "clarificationSummary">) {
+  return draft.clarificationSummary ?? DRAFT_SUMMARY_FALLBACK;
+}
+
+function DraftListItem({
+  draft,
+  isActive,
+  isConfirmingDelete,
+  isDeletePending,
+  onSelect,
+  onDelete,
+}: {
+  draft: IntakeDraft;
+  isActive: boolean;
+  isConfirmingDelete: boolean;
+  isDeletePending: boolean;
+  onSelect: () => void;
+  onDelete: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "border border-border",
+        isActive && "border-primary bg-muted",
+      )}
+    >
+      <div className="flex items-start gap-2 p-4">
+        <button
+          className="min-w-0 flex-1 space-y-4 text-left"
+          onClick={onSelect}
+          type="button"
+        >
+          <div className="space-y-2">
+            <h2 className="text-sm font-medium" title={draft.objective}>
+              {truncateDraftObjective(draft.objective)}
+            </h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={isActive ? "default" : "secondary"}>
+              {getDraftStatusLabel(draft)}
+            </Badge>
+            {draft.executionMode ? (
+              <Badge variant="outline">{draft.executionMode.replace("_", " ")}</Badge>
+            ) : null}
+          </div>
+          <Separator />
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Clock3Icon className="size-3.5" />
+            <span>
+              Created {formatDistanceToNowStrict(new Date(draft.createdAt))} ago
+            </span>
+          </div>
+        </button>
+
+        <Button
+          aria-label={
+            isConfirmingDelete
+              ? `Confirm delete ${draft.objective}`
+              : `Delete ${draft.objective}`
+          }
+          className={cn(
+            "shrink-0",
+            isConfirmingDelete &&
+              "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive",
+          )}
+          disabled={isDeletePending}
+          onClick={onDelete}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          {isConfirmingDelete ? (
+            <CheckIcon className="size-4" />
+          ) : (
+            <Trash2Icon className="size-4" />
+          )}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -275,7 +376,7 @@ function DraftWorkspaceView({
 
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_minmax(0,1fr)] xl:overflow-hidden">
-      <Card className="overflow-hidden border-none">
+      <Card className="hidden overflow-hidden border-none xl:block">
         <CardHeader className="-mt-2">
           <div className="flex flex-col gap-4">
             <div className="min-w-0 space-y-3">
@@ -283,8 +384,7 @@ function DraftWorkspaceView({
                 {flow.draft.objective}
               </CardTitle>
               <p className="max-w-5xl text-sm text-muted-foreground">
-                {flow.draft.clarificationSummary ??
-                  "Answer the next decisions so AutoBot can generate the draft plan."}
+                {getDraftWorkspaceSummary(flow.draft)}
               </p>
               <div className="flex flex-wrap gap-2">
                 <Badge variant={flow.draft.status === "review_ready" ? "default" : "outline"}>
@@ -382,8 +482,8 @@ function DraftWorkspaceView({
                 Capture the context the agent needs before generating or regenerating the draft.
               </CardDescription>
             </CardHeader>
-            <CardContent className="min-h-0 flex-1 overflow-hidden pb-0">
-              <div className="h-full overflow-y-auto pb-5">
+            <CardContent className="flex-1 pb-0 xl:min-h-0 xl:overflow-hidden">
+              <div className="pb-5 xl:h-full xl:overflow-y-auto">
               {activeQuestions.length > 0 ? (
                 <div className="space-y-5">
                   {activeQuestions.map((question, index) => (
@@ -585,7 +685,7 @@ function DraftWorkspaceView({
                 Edit the markdown directly or return to clarification to regenerate the draft.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col space-y-4">
+            <CardContent className="flex flex-1 flex-col space-y-4 xl:min-h-0">
               <div className="flex flex-wrap gap-2">
                 <Button onClick={onToggleReviewEditing} variant="outline">
                   {isEditingReview ? "Preview markdown" : "Edit markdown"}
@@ -599,12 +699,12 @@ function DraftWorkspaceView({
 
               {isEditingReview ? (
                 <Textarea
-                  className="min-h-0 flex-1 font-mono text-sm"
+                  className="min-h-[320px] font-mono text-sm xl:min-h-0 xl:flex-1"
                   onChange={(event) => onReviewMarkdownChange(event.target.value)}
                   value={reviewMarkdown}
                 />
               ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto border p-4">
+                <div className="border p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
                   <MarkdownPreview className="space-y-1" content={reviewMarkdown} />
                 </div>
               )}
@@ -672,6 +772,8 @@ export function DraftsDashboardClient({
   const isRestoring = useIsRestoring();
   const { activeProject, activeProjectId } = useProject();
   const requestedDraftId = searchParams.get("draftId");
+  const [confirmDeleteDraftId, setConfirmDeleteDraftId] = useState<string | null>(null);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
   const [answers, setAnswers] = useState<Record<string, QuestionResponse>>({});
   const [generatedAnswers, setGeneratedAnswers] = useState<Record<string, QuestionResponse>>({});
@@ -712,6 +814,18 @@ export function DraftsDashboardClient({
   const deferredDraftId = useDeferredValue(selectedDraftId);
 
   useEffect(() => {
+    if (!confirmDeleteDraftId) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setConfirmDeleteDraftId((current) => (current === confirmDeleteDraftId ? null : current));
+    }, 2200);
+
+    return () => window.clearTimeout(timeout);
+  }, [confirmDeleteDraftId]);
+
+  useEffect(() => {
     if (!activeProjectId) {
       return;
     }
@@ -746,6 +860,61 @@ export function DraftsDashboardClient({
   const isFlowTransitioning = Boolean(selectedDraftId) && deferredDraftId !== selectedDraftId;
   const isFlowLoading =
     isFlowTransitioning || flowQuery.isLoading || (flowQuery.isFetching && !flowQuery.data);
+  const selectedDraft = selectedDraftId
+    ? drafts.find((draft) => draft.id === selectedDraftId) ?? null
+    : null;
+  const selectedDraftSummary =
+    flowQuery.data?.draft.id === selectedDraftId
+      ? getDraftWorkspaceSummary(flowQuery.data.draft)
+      : selectedDraft
+        ? getDraftWorkspaceSummary(selectedDraft)
+        : null;
+
+  const handleSelectDraft = (draftId: string) => {
+    startTransition(() => {
+      router.replace(buildDraftHref(pathname, draftId), { scroll: false });
+    });
+    setIsMobileDrawerOpen(false);
+  };
+
+  const handleDeleteDraft = (draftId: string, event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (confirmDeleteDraftId === draftId) {
+      deleteDraftMutation.mutate(draftId);
+      return;
+    }
+
+    setConfirmDeleteDraftId(draftId);
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const pendingToast = window.sessionStorage.getItem(OBJECTIVE_START_SUCCESS_STORAGE_KEY);
+    if (!pendingToast) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(pendingToast) as {
+        draftId?: string;
+        toastId?: string;
+      };
+
+      if (!parsed.draftId || parsed.draftId !== selectedDraftId) {
+        return;
+      }
+
+      toast.success("Objective intake started.", {
+        id: parsed.toastId ?? undefined,
+      });
+      window.sessionStorage.removeItem(OBJECTIVE_START_SUCCESS_STORAGE_KEY);
+    } catch {
+      window.sessionStorage.removeItem(OBJECTIVE_START_SUCCESS_STORAGE_KEY);
+    }
+  }, [selectedDraftId]);
 
   useEffect(() => {
     if (!flowQuery.data) {
@@ -829,12 +998,22 @@ export function DraftsDashboardClient({
       syncFlow(flow);
       setGeneratedAnswers(normalizeAnswers(flow.questions));
       setMode(flow.draft.status === "review_ready" ? "review" : "questions");
+      toast.success(
+        flow.draft.status === "review_ready"
+          ? "Clarification complete. Review draft ready."
+          : "Clarification answers saved.",
+      );
     },
     onError: (submissionError, flow, context) => {
       if (context?.previousFlow) {
         syncFlow(context.previousFlow);
       }
 
+      toast.error(
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Unable to continue clarification.",
+      );
       setError(
         submissionError instanceof Error
           ? submissionError.message
@@ -873,19 +1052,25 @@ export function DraftsDashboardClient({
     onSuccess: (flow) => {
       syncFlow(flow);
       setIsEditingReview(false);
+      toast.success("Draft saved.");
     },
     onError: (saveError, flow, context) => {
       if (context?.previousFlow) {
         syncFlow(context.previousFlow);
       }
 
+      toast.error(saveError instanceof Error ? saveError.message : "Unable to save draft.");
       setError(saveError instanceof Error ? saveError.message : "Unable to save draft.");
     },
   });
 
   const startExecution = useMutation({
     mutationFn: async (flow: IntakeFlowResponse) =>
-      fetchJson<{ runId: string }>(`/api/intake/drafts/${flow.draft.id}/execute`, {
+      fetchJson<{
+        runId: string;
+        runStatus?: "ready" | "blocked" | "running" | "completed" | "failed" | "clarifying";
+        actionRequired?: unknown;
+      }>(`/api/intake/drafts/${flow.draft.id}/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       }),
@@ -913,11 +1098,17 @@ export function DraftsDashboardClient({
         dashboardQueryKeys.drafts.all(activeProjectId ?? "pending"),
         (currentDrafts) => currentDrafts?.filter((draft) => draft.id !== flow.draft.id),
       );
+      if (payload.runStatus === "blocked" || payload.actionRequired) {
+        await queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.notifications.all,
+        });
+      }
       if (activeProjectId) {
         await queryClient.invalidateQueries({
           queryKey: dashboardQueryKeys.runs.all(activeProjectId),
         });
       }
+      toast.success("Execution started.");
       startTransition(() => {
         router.push(`/dashboard/runs?runId=${payload.runId}`);
       });
@@ -927,14 +1118,97 @@ export function DraftsDashboardClient({
         syncFlow(context.previousFlow);
       }
 
+      toast.error(
+        executeError instanceof Error ? executeError.message : "Unable to start execution.",
+      );
       setError(
         executeError instanceof Error ? executeError.message : "Unable to start execution.",
       );
     },
   });
+  const deleteDraftMutation = useMutation({
+    mutationFn: (draftId: string) => deleteDraft(draftId),
+    onSuccess: ({ draftId }) => {
+      const currentDrafts =
+        queryClient.getQueryData<IntakeDraft[]>(
+          activeProjectId
+            ? dashboardQueryKeys.drafts.all(activeProjectId)
+            : dashboardQueryKeys.drafts.all("pending"),
+        ) ?? [];
+      const nextDrafts = currentDrafts.filter((draft) => draft.id !== draftId);
+
+      if (activeProjectId) {
+        queryClient.setQueryData(dashboardQueryKeys.drafts.all(activeProjectId), nextDrafts);
+      }
+      queryClient.removeQueries({
+        queryKey: dashboardQueryKeys.drafts.flow(draftId),
+      });
+      setConfirmDeleteDraftId(null);
+
+      if (selectedDraftId === draftId) {
+        const nextDraft = nextDrafts[0] ?? null;
+        startTransition(() => {
+          if (nextDraft) {
+            router.replace(buildDraftHref(pathname, nextDraft.id), { scroll: false });
+            return;
+          }
+
+          router.replace(pathname, { scroll: false });
+        });
+      }
+
+      toast.success("Draft deleted.");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Unable to delete draft.");
+    },
+  });
 
   return (
     <WorkspaceSplitLayout
+      mobileDescription={selectedDraftSummary}
+      mobileSelector={
+        activeProject ? (
+          <Drawer onOpenChange={setIsMobileDrawerOpen} open={isMobileDrawerOpen}>
+            <DrawerTrigger asChild>
+              <Button className="w-full justify-between" type="button" variant="outline">
+                <span className="flex items-center gap-2">
+                  <PanelLeftIcon className="size-4" />
+                  {selectedDraft ? "Browse drafts" : "Select a draft"}
+                </span>
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {drafts.length}
+                  <ChevronDownIcon className="size-4" />
+                </span>
+              </Button>
+            </DrawerTrigger>
+            <DrawerContent>
+              <DrawerHeader className="text-left">
+                <DrawerTitle>Drafts</DrawerTitle>
+                <DrawerDescription>
+                  Open an in-progress draft to continue clarification, review the plan, or launch execution.
+                </DrawerDescription>
+              </DrawerHeader>
+              <div className="overflow-y-auto px-4 pb-4">
+                <div className="space-y-2">
+                  {drafts.map((draft) => (
+                    <DraftListItem
+                      draft={draft}
+                      isActive={draft.id === selectedDraftId}
+                      isConfirmingDelete={confirmDeleteDraftId === draft.id}
+                      isDeletePending={deleteDraftMutation.isPending}
+                      key={draft.id}
+                      onDelete={(event) => handleDeleteDraft(draft.id, event)}
+                      onSelect={() => handleSelectDraft(draft.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </DrawerContent>
+          </Drawer>
+        ) : null
+      }
+      mobileTitle={selectedDraft?.objective ?? null}
       sidebar={
         <WorkspaceSidebarPanel
           description="Open an in-progress draft to continue clarification, review the plan, or launch execution."
@@ -978,45 +1252,16 @@ export function DraftsDashboardClient({
 
           <div className="space-y-2">
             {drafts.map((draft) => {
-              const isActive = draft.id === selectedDraftId;
-
               return (
-                <Button
-                  className={cn(
-                    "h-auto w-full items-start justify-start border border-border p-0 text-left whitespace-normal",
-                    isActive && "border-primary bg-muted",
-                  )}
+                <DraftListItem
+                  draft={draft}
+                  isActive={draft.id === selectedDraftId}
+                  isConfirmingDelete={confirmDeleteDraftId === draft.id}
+                  isDeletePending={deleteDraftMutation.isPending}
                   key={draft.id}
-                  onClick={() => {
-                    startTransition(() => {
-                      router.replace(buildDraftHref(pathname, draft.id), { scroll: false });
-                    });
-                  }}
-                  variant="ghost"
-                >
-                  <div className="w-full space-y-4 p-4">
-                    <div className="space-y-2">
-                      <h2 className="text-sm font-medium" title={draft.objective}>
-                        {truncateDraftObjective(draft.objective)}
-                      </h2>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant={isActive ? "default" : "secondary"}>
-                        {getDraftStatusLabel(draft)}
-                      </Badge>
-                      {draft.executionMode ? (
-                        <Badge variant="outline">{draft.executionMode.replace("_", " ")}</Badge>
-                      ) : null}
-                    </div>
-                    <Separator />
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock3Icon className="size-3.5" />
-                      <span>
-                        Created {formatDistanceToNowStrict(new Date(draft.createdAt))} ago
-                      </span>
-                    </div>
-                  </div>
-                </Button>
+                  onDelete={(event) => handleDeleteDraft(draft.id, event)}
+                  onSelect={() => handleSelectDraft(draft.id)}
+                />
               );
             })}
           </div>

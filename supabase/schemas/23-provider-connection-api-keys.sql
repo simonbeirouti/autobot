@@ -41,7 +41,7 @@ begin
     v_user_id,
     p_toolkit_slug,
     p_auth_scheme,
-    pgp_sym_encrypt(p_api_key, p_encryption_secret),
+    extensions.pgp_sym_encrypt(p_api_key, p_encryption_secret),
     right(p_api_key, 4),
     timezone('utc', now()),
     'initiated',

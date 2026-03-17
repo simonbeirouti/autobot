@@ -1,14 +1,13 @@
 "use client";
 
 import { Suspense } from "react";
-import { BellIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 import { RouteBreadcrumb } from "@/app/(protected)/route-breadcrumb";
 import { AppSidebar } from "@/components/app-sidebar";
+import { NotificationInbox } from "@/components/notification-inbox";
 import { useProject } from "@/components/providers/project-provider";
 import { ThemeSwitcher } from "@/components/theme-switcher";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { PROJECT_ONBOARDING_ROUTE } from "@/lib/routes";
 import {
@@ -58,9 +57,7 @@ export function ProtectedLayoutClient({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button aria-label="Notifications" size="icon" type="button" variant="outline">
-              <BellIcon className="size-4" />
-            </Button>
+            <NotificationInbox />
             <ThemeSwitcher />
           </div>
         </header>

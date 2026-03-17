@@ -2,16 +2,20 @@
 
 import type { ComponentType } from "react";
 import { useEffect, useRef } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
   ActivityIcon,
   BotIcon,
   ClipboardListIcon,
+  ExternalLinkIcon,
+  PlayIcon,
   WrenchIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Accordion,
   AccordionContent,
@@ -38,7 +42,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { RunEvent, RunTask, WorkspacePayload } from "@/lib/runs/types";
+import type { RunActionRequired, RunEvent, RunTask, WorkspacePayload } from "@/lib/runs/types";
 
 const colorClassMap: Record<string, string> = {
   amber: "text-chart-2",
@@ -58,11 +62,63 @@ export async function advanceWorkspace(runId: string) {
   });
 }
 
+export async function resumeWorkspace(runId: string) {
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function groupTasks(tasks: RunTask[]) {
   return {
     waiting: tasks.filter((task) => task.status === "waiting"),
     underway: tasks.filter((task) => task.status === "underway"),
     complete: tasks.filter((task) => task.status === "complete"),
+  };
+}
+
+function buildFallbackActionRequired(data: WorkspacePayload): RunActionRequired | null {
+  if (data.run.actionRequired) {
+    return data.run.actionRequired;
+  }
+
+  const incompleteTasks = data.tasks.filter((task) => task.status !== "complete");
+  const taskActionRequired = incompleteTasks.find((task) => task.actionRequired)?.actionRequired ?? null;
+  if (taskActionRequired) {
+    return taskActionRequired;
+  }
+
+  const setupTasks = incompleteTasks.filter(
+    (task) => task.executionStrategy === "manual_setup" && task.requiredToolkitSlugs.length > 0,
+  );
+  if (setupTasks.length === 0) {
+    return null;
+  }
+
+  const requiredToolkitSlugs = Array.from(
+    new Set(setupTasks.flatMap((task) => task.requiredToolkitSlugs)),
+  );
+
+  return {
+    kind: "manual_setup",
+    title: "Connect tools to continue this run",
+    body: "This run has prerequisite setup tasks before tool-backed work can continue.",
+    reason: "tool_prerequisites_missing",
+    requiredToolkitSlugs,
+    readiness: requiredToolkitSlugs.map((toolkitSlug) => ({
+      toolkitSlug,
+      status: "not_connected",
+      message: `${toolkitSlug} is selected for this project but not connected yet.`,
+    })),
+    actionLabel: "Connect tools",
+    actionHref: `/onboarding/providers?next=${encodeURIComponent(`/dashboard/runs?runId=${data.run.id}`)}`,
+    resumeLabel: "Resume run",
+    canResume: false,
+    autoResume: true,
+    notifiedAt: null,
+    emailFallbackAt: null,
+    emailEscalatedAt: null,
+    resolvedAt: null,
   };
 }
 
@@ -76,6 +132,15 @@ function TaskCard({ task }: { task: RunTask }) {
         </div>
         {task.description ? (
           <p className="text-sm text-muted-foreground">{task.description}</p>
+        ) : null}
+        {task.actionRequired?.requiredToolkitSlugs.length ? (
+          <div className="flex flex-wrap gap-2">
+            {task.actionRequired.requiredToolkitSlugs.map((toolkitSlug) => (
+              <Badge key={toolkitSlug} variant="outline">
+                {toolkitSlug}
+              </Badge>
+            ))}
+          </div>
         ) : null}
       </CardContent>
     </Card>
@@ -208,7 +273,7 @@ function BoardColumnSkeleton({
   return (
     <Card
       className={cn(
-        "min-h-[280px] overflow-hidden py-0 lg:h-full lg:min-h-0",
+        "min-h-[280px] overflow-hidden py-0 xl:h-full xl:min-h-0",
         tone === "amber" && "border-chart-2/40",
         tone === "cyan" && "border-chart-3/40",
         tone === "emerald" && "border-chart-1/40",
@@ -221,8 +286,8 @@ function BoardColumnSkeleton({
         </div>
       </CardHeader>
 
-      <CardContent className="min-h-0 flex-1 p-0 -mt-4">
-        <ScrollArea className="h-full">
+      <CardContent className="flex-1 p-0 -mt-4 xl:min-h-0">
+        <ScrollArea className="xl:h-full">
           <div className="space-y-3 p-4">
             <TaskCardSkeleton />
             <TaskCardSkeleton />
@@ -268,14 +333,14 @@ export function RunWorkspaceSkeleton() {
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
       <WorkspaceHeaderSkeleton />
 
-      <div className="grid md:grid-cols-2 2xl:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-4">
         <StatCardSkeleton />
         <StatCardSkeleton />
         <StatCardSkeleton />
         <StatCardSkeleton />
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2 lg:min-h-0 lg:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-2 xl:min-h-0 xl:grid-cols-3">
         <BoardColumnSkeleton titleWidth="w-24" tone="amber" />
         <BoardColumnSkeleton titleWidth="w-28" tone="cyan" />
         <BoardColumnSkeleton titleWidth="w-28" tone="emerald" />
@@ -288,17 +353,22 @@ export function RunWorkspaceSkeleton() {
 
 export function RunWorkspaceView({
   data,
+  isResuming = false,
+  onResume,
 }: {
   data: WorkspacePayload;
+  isResuming?: boolean;
+  onResume?: (() => void) | undefined;
 }) {
   const taskColumns = groupTasks(data.tasks);
   const handoffCount = data.usage.filter((item) => item.category === "agent_handoff").length;
   const toolCount = data.usage.filter((item) => item.category === "tool").length;
   const chatCount = data.usage.filter((item) => item.category === "chat").length;
+  const actionRequired = buildFallbackActionRequired(data);
 
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
-      <Card className="overflow-hidden border-none">
+      <Card className="hidden overflow-hidden border-none xl:block">
         <CardHeader className="-mt-2">
           <div className="flex flex-col gap-4">
             <div className="min-w-0 space-y-3">
@@ -315,6 +385,36 @@ export function RunWorkspaceView({
                   Updated {formatDistanceToNowStrict(new Date(data.run.updatedAt))} ago
                 </Badge>
               </div>
+              {actionRequired ? (
+                <div className="space-y-3 border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+                  <div className="space-y-1">
+                    <p className="font-semibold text-foreground">{actionRequired.title}</p>
+                    <p className="text-muted-foreground">{actionRequired.body}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {actionRequired.actionHref ? (
+                      <Button asChild size="sm">
+                        <Link href={actionRequired.actionHref}>
+                          {actionRequired.actionLabel ?? "Open setup"}
+                          <ExternalLinkIcon className="size-3.5" />
+                        </Link>
+                      </Button>
+                    ) : null}
+                    {actionRequired.canResume && onResume ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={onResume}
+                        disabled={isResuming}
+                      >
+                        <PlayIcon className="size-3.5" />
+                        {isResuming ? "Resuming..." : actionRequired.resumeLabel ?? "Resume"}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </CardHeader>
@@ -366,6 +466,22 @@ export function RunWorkspace({ runId }: { runId: string }) {
     mutationFn: () => advanceWorkspace(runId),
     onSuccess: (payload) => {
       queryClient.setQueryData(dashboardQueryKeys.runs.workspace(runId), payload);
+      if (payload.run.status === "blocked" || payload.run.actionRequired) {
+        queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.notifications.all,
+        });
+      }
+    },
+  });
+  const resumeMutation = useMutation({
+    mutationFn: () => resumeWorkspace(runId),
+    onSuccess: (payload) => {
+      queryClient.setQueryData(dashboardQueryKeys.runs.workspace(runId), payload);
+      if (payload.run.status === "blocked" || payload.run.actionRequired) {
+        queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.notifications.all,
+        });
+      }
     },
   });
 
@@ -374,7 +490,11 @@ export function RunWorkspace({ runId }: { runId: string }) {
       return;
     }
 
-    if (data.run.status === "completed" || data.run.status === "failed") {
+    if (
+      data.run.status === "completed" ||
+      data.run.status === "failed" ||
+      data.run.status === "blocked"
+    ) {
       return;
     }
 
@@ -406,6 +526,8 @@ export function RunWorkspace({ runId }: { runId: string }) {
   return (
     <RunWorkspaceView
       data={data}
+      isResuming={resumeMutation.isPending}
+      onResume={() => resumeMutation.mutate()}
     />
   );
 }

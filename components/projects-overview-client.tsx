@@ -41,6 +41,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   useManageProjectsQuery,
   useUpdateProjectMutation,
@@ -59,6 +60,77 @@ function formatTimestamp(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function ProjectCardSkeleton() {
+  return (
+    <Card className="border border-border/70 bg-background/95 shadow-[0_18px_50px_-36px_rgba(15,23,42,0.45)]">
+      <CardHeader className="gap-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="size-11" />
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-36" />
+              <Skeleton className="h-4 w-52" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-6 w-16" />
+            <Skeleton className="h-6 w-20" />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+      </CardContent>
+      <CardFooter className="flex flex-wrap items-center justify-between gap-3">
+        <Skeleton className="h-4 w-64" />
+        <div className="flex flex-wrap items-center gap-2">
+          <Skeleton className="h-9 w-32" />
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </CardFooter>
+    </Card>
+  );
+}
+
+export function ProjectsOverviewSkeleton({
+  showHeader = true,
+}: {
+  showHeader?: boolean;
+}) {
+  return (
+    <div className="relative flex min-h-full flex-1 flex-col gap-4 overflow-hidden">
+      <div className="relative space-y-4">
+        {showHeader ? (
+          <div className="flex flex-col gap-4 border border-border/70 p-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-2xl space-y-3">
+              <Skeleton className="h-7 w-32" />
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-80" />
+                <Skeleton className="h-4 w-full max-w-2xl" />
+                <Skeleton className="h-4 w-11/12 max-w-2xl" />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Skeleton className="h-10 w-36" />
+              <Skeleton className="h-10 w-36" />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <ProjectCardSkeleton key={index} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ProjectCard({
@@ -252,9 +324,7 @@ export function ProjectsOverviewClient() {
           </div>
 
           {isLoading ? (
-            <div className="flex min-h-64 items-center justify-center border border-dashed border-border/70 bg-background/70 text-sm text-muted-foreground">
-              Loading projects...
-            </div>
+            <ProjectsOverviewSkeleton showHeader={false} />
           ) : projects.length === 0 ? (
             <Empty className="min-h-72 border border-dashed border-border/70 bg-background/70">
               <EmptyHeader>

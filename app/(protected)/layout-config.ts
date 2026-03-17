@@ -93,6 +93,7 @@ export const protectedRouteTitles: Record<string, string> = {
   "/dashboard/tools": "Tools",
   "/projects": "Projects",
   "/projects/new": "New Project",
+  "/settings": "Settings",
 };
 
 function formatSegment(segment: string) {

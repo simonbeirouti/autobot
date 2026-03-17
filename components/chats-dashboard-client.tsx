@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import { Clock3Icon, FolderKanbanIcon, MessageSquareIcon, PlusIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import { useProject } from "@/components/providers/project-provider";
 import { Button } from "@/components/ui/button";
@@ -374,6 +375,7 @@ export function ChatsDashboardClient() {
       }
 
       setOptimisticMessages([]);
+      toast.error(error instanceof Error ? error.message : "Unable to send project message.");
       setStreamError(error instanceof Error ? error.message : "Unable to send project message.");
     },
   });
