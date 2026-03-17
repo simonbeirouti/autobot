@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  LifeBuoyIcon,
   SendIcon,
   FileTextIcon,
   Footprints,
@@ -13,6 +12,7 @@ import {
 import { PROJECTS_ROUTE } from "@/lib/routes";
 
 export type SidebarNavItem = {
+  action?: "feedback-dialog";
   icon: LucideIcon;
   isActive?: boolean;
   items?: {
@@ -58,6 +58,7 @@ export const protectedNavSecondary: SidebarNavItem[] = [
     title: "Feedback",
     href: "#",
     icon: SendIcon,
+    action: "feedback-dialog",
   },
 ];
 

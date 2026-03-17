@@ -1,10 +1,8 @@
 "use client";
 
 import {
-  BadgeCheckIcon,
-  BellIcon,
   ChevronsUpDownIcon,
-  CreditCardIcon,
+  CogIcon,
   LogOutIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -112,16 +110,8 @@ export function NavUser({
           >
             <DropdownMenuGroup>
               <DropdownMenuItem>
-                <BadgeCheckIcon />
-                Account
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <CreditCardIcon />
-                Billing
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <BellIcon />
-                Notifications
+                <CogIcon />
+                Settings
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
