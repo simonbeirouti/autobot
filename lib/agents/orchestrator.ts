@@ -231,6 +231,96 @@ function buildDraftMarkdown(params: {
   ].join("\n");
 }
 
+function normalizeToolkitSlug(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function planTaskTools(params: {
+  objective: string;
+  task: ClarificationTaskDraft;
+  availableToolkitSlugs?: string[];
+  selectedToolkitSlugs?: string[];
+}): Pick<
+  ClarificationTaskDraft,
+  "requiredToolkitSlugs" | "requiredToolIds" | "executionStrategy" | "toolSummary"
+> {
+  const availableToolkitSlugs = (params.availableToolkitSlugs ?? []).map(normalizeToolkitSlug);
+  const selectedToolkitSlugs = (params.selectedToolkitSlugs ?? []).map(normalizeToolkitSlug);
+  const knownToolkitSlugs = Array.from(new Set([...availableToolkitSlugs, ...selectedToolkitSlugs]));
+  const haystack = `${params.objective}\n${params.task.title}\n${params.task.description ?? ""}`.toLowerCase();
+  const matchedToolkits = knownToolkitSlugs.filter((toolkitSlug) => haystack.includes(toolkitSlug));
+  const fallbackToolkit =
+    matchedToolkits.length > 0
+      ? matchedToolkits
+      : params.task.agentId === "operator" && availableToolkitSlugs.length > 0
+        ? availableToolkitSlugs.slice(0, 2)
+        : [];
+
+  const taskText = `${params.task.title} ${params.task.description ?? ""}`.toLowerCase();
+  const likelyToolTask =
+    params.task.agentId === "operator" &&
+    /(execute|send|sync|update|connect|publish|create|deliver|post|upload|integrat)/.test(taskText);
+  const setupTask = /(connect|auth|authorize|api key|credential|login|setup|configure)/.test(taskText);
+
+  const executionStrategy =
+    setupTask
+      ? ("manual_setup" as const)
+      : likelyToolTask && (availableToolkitSlugs.length > 0 || selectedToolkitSlugs.length > 0)
+        ? ("tool_execution" as const)
+        : ("analysis_only" as const);
+
+  const toolSummary =
+    executionStrategy === "manual_setup"
+      ? fallbackToolkit.length > 0
+        ? `This task depends on connecting ${fallbackToolkit.join(", ")} before execution can continue.`
+        : "This task is a prerequisite setup step for tool-backed execution."
+      : executionStrategy === "tool_execution"
+        ? fallbackToolkit.length > 0
+          ? `Use connected toolkit(s) ${fallbackToolkit.join(", ")} to complete the task when possible.`
+          : "Use available connected tools to complete the task when possible."
+        : fallbackToolkit.length > 0
+          ? `Tool context to consider: ${fallbackToolkit.join(", ")}.`
+          : "";
+
+  return {
+    requiredToolkitSlugs: fallbackToolkit,
+    requiredToolIds: params.task.requiredToolIds ?? [],
+    executionStrategy,
+    toolSummary,
+  };
+}
+
+function enrichClarificationTasks(params: {
+  objective: string;
+  tasks: ClarificationTaskDraft[];
+  availableToolkitSlugs?: string[];
+  selectedToolkitSlugs?: string[];
+}) {
+  return params.tasks.map((task) => ({
+    ...task,
+    ...planTaskTools({
+      objective: params.objective,
+      task,
+      availableToolkitSlugs: params.availableToolkitSlugs,
+      selectedToolkitSlugs: params.selectedToolkitSlugs,
+    }),
+  }));
+}
+
+function createTaskDraft(task: {
+  title: string;
+  description: string;
+  agentId: AgentId;
+}): ClarificationTaskDraft {
+  return {
+    ...task,
+    requiredToolkitSlugs: [],
+    requiredToolIds: [],
+    executionStrategy: "analysis_only",
+    toolSummary: "",
+  };
+}
+
 function fallbackClarification(
   objective: string,
   transcript: TranscriptTurn[],
@@ -329,43 +419,43 @@ function fallbackClarification(
   const tasks: ClarificationTaskDraft[] =
     executionMode === "multi_agent"
       ? [
-          {
+          createTaskDraft({
             title: "Map the objective into a clear execution brief",
             description: "Capture goals, constraints, target audience, and success metrics.",
             agentId: "orchestrator",
-          },
-          {
+          }),
+          createTaskDraft({
             title: "Research supporting facts, context, and dependencies",
             description: "Gather the inputs needed to de-risk the objective.",
             agentId: "researcher",
-          },
-          {
+          }),
+          createTaskDraft({
             title: "Execute the first delivery slice",
             description: "Start tangible work against the brief and produce an initial result.",
             agentId: "operator",
-          },
-          {
+          }),
+          createTaskDraft({
             title: "Review output quality and close open gaps",
             description: "Assess whether the produced result satisfies the business goal.",
             agentId: "analyst",
-          },
+          }),
         ]
       : [
-          {
+          createTaskDraft({
             title: "Convert the objective into an execution brief",
             description: "Summarize goals, constraints, and the immediate deliverable.",
             agentId: "orchestrator",
-          },
-          {
+          }),
+          createTaskDraft({
             title: "Complete the first meaningful task",
             description: "Produce a concrete output toward the business objective.",
             agentId: "operator",
-          },
-          {
+          }),
+          createTaskDraft({
             title: "Review and finalize the response",
             description: "Confirm the output answers the clarified objective.",
             agentId: "analyst",
-          },
+          }),
         ];
 
   const summary =
@@ -737,8 +827,17 @@ export function buildInitialRunPayload(params: {
   sessionId: string;
   objective: string;
   result: ClarificationResult;
+  activeToolkitSlugs?: string[];
+  selectedToolkitSlugs?: string[];
 }) {
-  const tasks = params.result.tasks.map((task, index) => {
+  const plannedTasks = enrichClarificationTasks({
+    objective: params.objective,
+    tasks: params.result.tasks,
+    availableToolkitSlugs: params.activeToolkitSlugs,
+    selectedToolkitSlugs: params.selectedToolkitSlugs,
+  });
+
+  const tasks = plannedTasks.map((task, index) => {
     const agentId = normalizeAgentId(task.agentId);
     return {
       runId: params.runId,
@@ -748,6 +847,10 @@ export function buildInitialRunPayload(params: {
       position: index,
       agentId,
       agentLabel: AGENT_STYLES[agentId].label,
+      requiredToolkitSlugs: task.requiredToolkitSlugs ?? [],
+      requiredToolIds: task.requiredToolIds ?? [],
+      executionStrategy: task.executionStrategy ?? "analysis_only",
+      toolSummary: task.toolSummary || null,
     };
   });
 
@@ -777,6 +880,28 @@ export function buildInitialRunPayload(params: {
         message,
       }),
     ),
+    ...plannedTasks
+      .filter(
+        (task) =>
+          (task.requiredToolkitSlugs?.length ?? 0) > 0 ||
+          Boolean(task.toolSummary),
+      )
+      .map((task) =>
+        createEvent({
+          runId: params.runId,
+          type: "tool",
+          agentId: normalizeAgentId(task.agentId),
+          message:
+            task.toolSummary ||
+            `Planned tool context: ${(task.requiredToolkitSlugs ?? []).join(", ")}`,
+          metadata: {
+            taskTitle: task.title,
+            executionStrategy: task.executionStrategy ?? "analysis_only",
+            requiredToolkitSlugs: task.requiredToolkitSlugs ?? [],
+            requiredToolIds: task.requiredToolIds ?? [],
+          },
+        }),
+      ),
   ];
 
   const usage = [

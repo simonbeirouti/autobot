@@ -15,6 +15,7 @@ import {
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import { resolveProjectToolRuntime } from "@/lib/tools/runtime";
 
 export async function POST(
   _request: Request,
@@ -81,6 +82,12 @@ export async function POST(
       readinessSummary: draft.clarificationSummary ?? "Draft approved for execution.",
     });
 
+    const toolRuntime = await resolveProjectToolRuntime(supabase, {
+      userId: user.sub,
+      projectId: draft.projectId,
+      query: draft.objective,
+    });
+
     const companyKey = resolveCompanyKey({
       sub: user.sub,
       email: typeof user.email === "string" ? user.email : null,
@@ -112,6 +119,8 @@ export async function POST(
       runId: run.id,
       sessionId: draft.sessionId,
       objective: draft.objective,
+      activeToolkitSlugs: toolRuntime.activeToolkitSlugs,
+      selectedToolkitSlugs: toolRuntime.selectedToolkitSlugs,
       result: {
         status: "ready_to_execute",
         summary: draft.clarificationSummary ?? "Draft approved for execution.",

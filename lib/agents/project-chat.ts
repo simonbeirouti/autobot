@@ -1,18 +1,8 @@
 import {
-  AIMessage,
   HumanMessage,
   SystemMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import {
-  Annotation,
-  END,
-  MemorySaver,
-  MessagesAnnotation,
-  START,
-  StateGraph,
-  type BaseCheckpointSaver,
-} from "@langchain/langgraph";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getConfiguredChatModel } from "@/lib/agents/model";
@@ -34,26 +24,7 @@ import type {
   ProjectChatResponse,
   ProjectChatStreamEvent,
 } from "@/lib/projects/types";
-import { resolveProjectTools } from "@/lib/tools/resolver";
-
-const ProjectChatState = Annotation.Root({
-  ...MessagesAnnotation.spec,
-  projectName: Annotation<string>({ reducer: (_c, u) => u, default: () => "" }),
-  projectDescription: Annotation<string>({ reducer: (_c, u) => u, default: () => "" }),
-  objectiveTitle: Annotation<string | null>({ reducer: (_c, u) => u, default: () => null }),
-  objectiveDescription: Annotation<string | null>({ reducer: (_c, u) => u, default: () => null }),
-  memoryContextMarkdown: Annotation<string>({ reducer: (_c, u) => u, default: () => "" }),
-  citedMemoryIds: Annotation<string[]>({ reducer: (_c, u) => u, default: () => [] }),
-  routedAgentId: Annotation<(typeof agentIds)[number] | null>({
-    reducer: (_c, u) => u,
-    default: () => null,
-  }),
-  responseStyle: Annotation<string>({ reducer: (_c, u) => u, default: () => "Clear and direct." }),
-  toolsContextMarkdown: Annotation<string>({ reducer: (_c, u) => u, default: () => "" }),
-});
-
-let projectChatCheckpointerPromise: Promise<BaseCheckpointSaver<number>> | null = null;
-let compiledProjectChatGraphPromise: Promise<ReturnType<typeof createProjectChatGraph>> | null = null;
+import { executeToolAssistedPrompt, resolveProjectToolRuntime } from "@/lib/tools/runtime";
 
 function normalizeMessageContent(content: BaseMessage["content"]) {
   if (typeof content === "string") {
@@ -73,11 +44,6 @@ function normalizeMessageContent(content: BaseMessage["content"]) {
   return "";
 }
 
-function getLatestUserMessage(messages: BaseMessage[]) {
-  const latestHuman = [...messages].reverse().find((message) => message._getType() === "human");
-  return latestHuman ? normalizeMessageContent(latestHuman.content) : "";
-}
-
 function getAgentPrompt(agentId: (typeof agentIds)[number]) {
   if (agentId === "researcher") {
     return "You are the Researcher. Answer with context, evidence, assumptions, and what is still unknown.";
@@ -91,134 +57,55 @@ function getAgentPrompt(agentId: (typeof agentIds)[number]) {
   return "You are the Orchestrator. Resolve ambiguity, summarize what matters, and hand back the clearest answer for this project or objective.";
 }
 
-async function getProjectChatCheckpointer() {
-  if (!projectChatCheckpointerPromise) {
-    projectChatCheckpointerPromise = (async () => {
-      const connectionString =
-        process.env.LANGGRAPH_CHECKPOINT_DATABASE_URL ??
-        process.env.DATABASE_URL ??
-        process.env.POSTGRES_URL ??
-        null;
+async function routeProjectChat(
+  message: string,
+): Promise<{
+  routedAgentId: (typeof agentIds)[number];
+  responseStyle: string;
+}> {
+  const model = getConfiguredChatModel();
 
-      if (!connectionString) {
-        return new MemorySaver();
-      }
-
-      try {
-        const checkpointPackage = await import("@langchain/langgraph-checkpoint-postgres");
-        const saver = checkpointPackage.PostgresSaver.fromConnString(connectionString);
-        await saver.setup();
-        return saver;
-      } catch (error) {
-        console.warn("[project-chat] Falling back to MemorySaver", error);
-        return new MemorySaver();
-      }
-    })();
+  if (!message.trim()) {
+    return { routedAgentId: "orchestrator" as const, responseStyle: "Clear and direct." };
   }
 
-  return projectChatCheckpointerPromise;
-}
+  if (!model) {
+    const fallback = createRoutingFallback(message);
+    return {
+      routedAgentId: fallback.agentId,
+      responseStyle: fallback.responseStyle,
+    };
+  }
 
-function createProjectChatGraph(checkpointer: Awaited<ReturnType<typeof getProjectChatCheckpointer>>) {
-  const routeNode = async (state: typeof ProjectChatState.State) => {
-    const latestUserMessage = getLatestUserMessage(state.messages);
-    const model = getConfiguredChatModel();
-
-    if (!latestUserMessage) {
-      return { routedAgentId: "orchestrator" as const, responseStyle: "Clear and direct." };
-    }
-
-    if (!model) {
-      return createRoutingFallback(latestUserMessage);
-    }
-
-    try {
-      return await model.withStructuredOutput(chatRoutingDecisionSchema, {
-        name: "project_chat_routing",
-        strict: true,
-      }).invoke([
-        new SystemMessage(
-          [
-            "Route the project question to one agent.",
-            "Use orchestrator for ambiguity, coordination, or mixed questions.",
-            "Use researcher for context, background, comparisons, or what we know.",
-            "Use operator for execution, workflow, tooling, ownership, and next steps.",
-            "Use analyst for metrics, outcomes, tradeoffs, and performance.",
-          ].join("\n"),
-        ),
-        new HumanMessage(latestUserMessage),
-      ]);
-    } catch (error) {
-      console.warn("[project-chat] Route fallback", error);
-      return createRoutingFallback(latestUserMessage);
-    }
-  };
-
-  const answerNode = async (state: typeof ProjectChatState.State) => {
-    const latestUserMessage = getLatestUserMessage(state.messages);
-    const model = getConfiguredChatModel();
-    const agentId = state.routedAgentId ?? "orchestrator";
-    const citedMemoryIds = state.citedMemoryIds ?? [];
-
-    if (!latestUserMessage) {
-      return { messages: [new AIMessage("I’m missing the question for this thread.")], citedMemoryIds };
-    }
-
-    if (!model) {
-      return {
-        messages: [
-          new AIMessage(
-            [
-              `${AGENT_STYLES[agentId].label} view for ${state.projectName}:`,
-              latestUserMessage,
-              "",
-              state.memoryContextMarkdown || "No stored memory yet.",
-            ].join("\n"),
-          ),
-        ],
-        citedMemoryIds,
-      };
-    }
-
-    const response = await model.invoke([
+  try {
+    const result = await model.withStructuredOutput(chatRoutingDecisionSchema, {
+      name: "project_chat_routing",
+      strict: true,
+    }).invoke([
       new SystemMessage(
         [
-          getAgentPrompt(agentId),
-          "Answer only from the active project, optional objective, retrieved long-term memory, and the current chat thread.",
-          "Do not pull in context from other projects.",
-          `Preferred style: ${state.responseStyle}`,
-          "",
-          "Retrieved context:",
-          state.memoryContextMarkdown || "No stored memory yet.",
-          "",
-          state.toolsContextMarkdown || "Project tool context: none configured.",
+          "Route the project question to one agent.",
+          "Use orchestrator for ambiguity, coordination, or mixed questions.",
+          "Use researcher for context, background, comparisons, or what we know.",
+          "Use operator for execution, workflow, tooling, ownership, and next steps.",
+          "Use analyst for metrics, outcomes, tradeoffs, and performance.",
         ].join("\n"),
       ),
-      ...state.messages,
+      new HumanMessage(message),
     ]);
 
     return {
-      messages: [new AIMessage(normalizeMessageContent(response.content))],
-      citedMemoryIds,
+      routedAgentId: result.agentId,
+      responseStyle: result.responseStyle,
     };
-  };
-
-  return new StateGraph(ProjectChatState)
-    .addNode("route", routeNode)
-    .addNode("answer", answerNode)
-    .addEdge(START, "route")
-    .addEdge("route", "answer")
-    .addEdge("answer", END)
-    .compile({ checkpointer });
-}
-
-async function getCompiledProjectChatGraph() {
-  if (!compiledProjectChatGraphPromise) {
-    compiledProjectChatGraphPromise = getProjectChatCheckpointer().then((checkpointer) =>
-      createProjectChatGraph(checkpointer),
-    );
+  } catch (error) {
+    console.warn("[project-chat] Route fallback", error);
+    const fallback = createRoutingFallback(message);
+    return {
+      routedAgentId: fallback.agentId,
+      responseStyle: fallback.responseStyle,
+    };
   }
-  return compiledProjectChatGraphPromise;
 }
 
 function collectCitedMemoryIds(memoryContext: MemoryContext) {
@@ -230,6 +117,126 @@ function collectCitedMemoryIds(memoryContext: MemoryContext) {
   ]
     .map((memory) => memory.id)
     .slice(0, 8);
+}
+
+function streamText(text: string, onEvent?: (event: ProjectChatStreamEvent) => void) {
+  if (!onEvent || !text) {
+    return;
+  }
+
+  for (const chunk of text.split(/(\s+)/).filter(Boolean)) {
+    onEvent({ type: "token", text: chunk });
+  }
+}
+
+async function answerProjectChat(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  project: Project;
+  objective?: Objective | null;
+  threadId: string;
+  message: string;
+  routedAgentId: (typeof agentIds)[number];
+  responseStyle: string;
+  memoryContext: MemoryContext;
+  onEvent?: (event: ProjectChatStreamEvent) => void;
+}): Promise<ProjectChatResponse> {
+  const model = getConfiguredChatModel();
+  const citedMemoryIds = collectCitedMemoryIds(params.memoryContext);
+  const runtime = await resolveProjectToolRuntime(params.supabase, {
+    userId: params.userId,
+    projectId: params.project.id,
+    query: params.message,
+  });
+  const memoryContextMarkdown = formatMemoryContext(
+    params.project,
+    params.memoryContext,
+    params.objective ?? null,
+  );
+
+  if (!model) {
+    const answer = [
+      `${AGENT_STYLES[params.routedAgentId].label} view for ${params.project.name}:`,
+      params.message,
+      "",
+      memoryContextMarkdown || "No stored memory yet.",
+      "",
+      runtime.markdown,
+    ].join("\n");
+
+    streamText(answer, params.onEvent);
+
+    return {
+      threadId: params.threadId,
+      routedAgentId: params.routedAgentId,
+      answer,
+      citedMemoryIds,
+    };
+  }
+
+  const baseMessages: BaseMessage[] = [
+    new SystemMessage(
+      [
+        getAgentPrompt(params.routedAgentId),
+        "Answer only from the active project, optional objective, retrieved long-term memory, and the current chat thread.",
+        "Do not pull in context from other projects.",
+        `Preferred style: ${params.responseStyle}`,
+        "",
+        "Retrieved context:",
+        memoryContextMarkdown || "No stored memory yet.",
+        "",
+        runtime.markdown,
+        runtime.toolCandidates.length > 0
+          ? "Use connected tools when they materially help answer the user."
+          : "No executable tools are currently available for this request.",
+        runtime.missingPrerequisites.length > 0
+          ? `Missing setup: ${runtime.missingPrerequisites.map((item) => item.message).join(" ")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    ),
+    new HumanMessage(params.message),
+  ];
+
+  if (runtime.toolCandidates.length === 0) {
+    const response = await model.invoke(baseMessages);
+    const answer = normalizeMessageContent(response.content);
+    streamText(answer, params.onEvent);
+
+    return {
+      threadId: params.threadId,
+      routedAgentId: params.routedAgentId,
+      answer,
+      citedMemoryIds,
+    };
+  }
+
+  const { answer: finalAnswer } = await executeToolAssistedPrompt({
+    supabase: params.supabase,
+    context: {
+      userId: params.userId,
+      projectId: params.project.id,
+      objectiveId: params.objective?.id ?? null,
+      threadId: params.threadId,
+      runId: null,
+      allowedToolkitSlugs: runtime.activeToolkitSlugs,
+      confirmedWriteActions: false,
+    },
+    systemPrompt: normalizeMessageContent((baseMessages[0] as SystemMessage).content),
+    userMessage: params.message,
+    runtime,
+    onEvent: (event) => params.onEvent?.(event),
+  });
+
+  streamText(finalAnswer, params.onEvent);
+
+  return {
+    threadId: params.threadId,
+    routedAgentId: params.routedAgentId,
+    answer: finalAnswer,
+    citedMemoryIds,
+  };
 }
 
 export async function appendChatTurn(
@@ -264,77 +271,20 @@ export async function invokeProjectChat(
     message: string;
   },
 ): Promise<ProjectChatResponse> {
-  const [graph, memoryContext] = await Promise.all([
-    getCompiledProjectChatGraph(),
-    appendChatTurn(supabase, {
-      userId: params.userId,
-      companyKey: params.companyKey,
-      project: params.project,
-      objective: params.objective ?? null,
-      threadId: params.threadId,
-      message: params.message,
-    }),
-  ]);
-  const toolContext = await resolveProjectTools(supabase, {
-    projectId: params.project.id,
+  const memoryContext = await appendChatTurn(supabase, params);
+  const routing = await routeProjectChat(params.message);
+
+  return answerProjectChat({
+    supabase,
     userId: params.userId,
-  });
-
-  const citedMemoryIds = collectCitedMemoryIds(memoryContext);
-  const result = await graph.invoke(
-    {
-      messages: [new HumanMessage(params.message)],
-      projectName: params.project.name,
-      projectDescription: params.project.description,
-      objectiveTitle: params.objective?.title ?? null,
-      objectiveDescription: params.objective?.description ?? null,
-      memoryContextMarkdown: formatMemoryContext(params.project, memoryContext, params.objective ?? null),
-      citedMemoryIds,
-      toolsContextMarkdown: toolContext.markdown,
-    },
-    { configurable: { thread_id: params.threadId } },
-  );
-
-  return {
+    project: params.project,
+    objective: params.objective ?? null,
     threadId: params.threadId,
-    routedAgentId: result.routedAgentId ?? "orchestrator",
-    answer: normalizeMessageContent(result.messages.at(-1)?.content ?? ""),
-    citedMemoryIds: result.citedMemoryIds ?? citedMemoryIds,
-  };
-}
-
-function getNodeUpdate(
-  chunk: unknown,
-  nodeName: string,
-): Record<string, unknown> | null {
-  if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) {
-    return null;
-  }
-
-  const nodeUpdate = (chunk as Record<string, unknown>)[nodeName];
-  if (!nodeUpdate || typeof nodeUpdate !== "object" || Array.isArray(nodeUpdate)) {
-    return null;
-  }
-
-  return nodeUpdate as Record<string, unknown>;
-}
-
-function getMetadataNodeName(metadata: unknown) {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    return null;
-  }
-
-  const value = (metadata as Record<string, unknown>).langgraph_node;
-  return typeof value === "string" ? value : null;
-}
-
-function getChunkText(chunk: unknown) {
-  if (!chunk || typeof chunk !== "object") {
-    return "";
-  }
-
-  const content = (chunk as { content?: BaseMessage["content"] }).content;
-  return normalizeMessageContent(content ?? "");
+    message: params.message,
+    routedAgentId: routing.routedAgentId ?? "orchestrator",
+    responseStyle: routing.responseStyle ?? "Clear and direct.",
+    memoryContext,
+  });
 }
 
 export async function* streamProjectChat(
@@ -349,94 +299,33 @@ export async function* streamProjectChat(
     message: string;
   },
 ): AsyncGenerator<ProjectChatStreamEvent, ProjectChatResponse, void> {
-  const [graph, memoryContext] = await Promise.all([
-    getCompiledProjectChatGraph(),
-    appendChatTurn(supabase, {
-      userId: params.userId,
-      companyKey: params.companyKey,
-      project: params.project,
-      objective: params.objective ?? null,
-      threadId: params.threadId,
-      message: params.message,
-    }),
-  ]);
-  const toolContext = await resolveProjectTools(supabase, {
-    projectId: params.project.id,
+  const memoryContext = await appendChatTurn(supabase, params);
+  const routing = await routeProjectChat(params.message);
+  const routedAgentId = routing.routedAgentId ?? "orchestrator";
+
+  yield { type: "route", routedAgentId };
+
+  const queuedEvents: ProjectChatStreamEvent[] = [];
+  const response = await answerProjectChat({
+    supabase,
     userId: params.userId,
+    project: params.project,
+    objective: params.objective ?? null,
+    threadId: params.threadId,
+    message: params.message,
+    routedAgentId,
+    responseStyle: routing.responseStyle ?? "Clear and direct.",
+    memoryContext,
+    onEvent: (event) => {
+      queuedEvents.push(event);
+    },
   });
 
-  const citedMemoryIds = collectCitedMemoryIds(memoryContext);
-  let routedAgentId = "orchestrator";
-  let answer = "";
-
-  const stream = await graph.stream(
-    {
-      messages: [new HumanMessage(params.message)],
-      projectName: params.project.name,
-      projectDescription: params.project.description,
-      objectiveTitle: params.objective?.title ?? null,
-      objectiveDescription: params.objective?.description ?? null,
-      memoryContextMarkdown: formatMemoryContext(params.project, memoryContext, params.objective ?? null),
-      citedMemoryIds,
-      toolsContextMarkdown: toolContext.markdown,
-    },
-    {
-      configurable: { thread_id: params.threadId },
-      streamMode: ["updates", "messages"],
-    },
-  );
-
-  for await (const [mode, chunk] of stream) {
-    if (mode === "updates") {
-      const routeUpdate = getNodeUpdate(chunk, "route");
-      const nextAgentId = routeUpdate?.routedAgentId;
-      if (typeof nextAgentId === "string" && nextAgentId.length > 0 && nextAgentId !== routedAgentId) {
-        routedAgentId = nextAgentId;
-        yield { type: "route", routedAgentId };
-      }
-
-      const answerUpdate = getNodeUpdate(chunk, "answer");
-      const nextCitedMemoryIds = answerUpdate?.citedMemoryIds;
-      if (Array.isArray(nextCitedMemoryIds)) {
-        citedMemoryIds.splice(0, citedMemoryIds.length, ...nextCitedMemoryIds.filter((id): id is string => typeof id === "string"));
-      }
-
-      const nextMessages = answerUpdate?.messages;
-      if (!answer && Array.isArray(nextMessages) && nextMessages.length > 0) {
-        const finalMessage = nextMessages.at(-1);
-        const finalText = getChunkText(finalMessage);
-        if (finalText) {
-          answer = finalText;
-        }
-      }
-
-      continue;
-    }
-
-    if (mode !== "messages" || !Array.isArray(chunk)) {
-      continue;
-    }
-
-    const [messageChunk, metadata] = chunk;
-    if (getMetadataNodeName(metadata) !== "answer") {
-      continue;
-    }
-
-    const token = getChunkText(messageChunk);
-    if (!token) {
-      continue;
-    }
-
-    answer += token;
-    yield { type: "token", text: token };
+  for (const event of queuedEvents) {
+    yield event;
   }
 
-  return {
-    threadId: params.threadId,
-    routedAgentId,
-    answer,
-    citedMemoryIds,
-  };
+  return response;
 }
 
 export async function promoteDurableFactsFromTurn(

@@ -317,6 +317,31 @@ export function ChatsDashboardClient() {
                   : currentMessage,
               ),
             );
+            return;
+          }
+
+          if (
+            event.type === "tool_call_started" ||
+            event.type === "tool_call_completed" ||
+            event.type === "tool_call_failed" ||
+            event.type === "tool_confirmation_required"
+          ) {
+            const line =
+              event.type === "tool_call_started"
+                ? `\n[Using ${event.toolName} via ${event.toolkitSlug}]`
+                : event.type === "tool_call_completed"
+                  ? `\n[${event.toolName} completed: ${event.summary}]`
+                  : event.type === "tool_call_failed"
+                    ? `\n[${event.toolName} failed: ${event.error}]`
+                    : `\n[${event.toolName} requires confirmation: ${event.reason}]`;
+
+            setOptimisticMessages((currentMessages) =>
+              currentMessages.map((currentMessage) =>
+                currentMessage.id === optimisticAssistantMessage.id
+                  ? { ...currentMessage, content: `${currentMessage.content}${line}` }
+                  : currentMessage,
+              ),
+            );
           }
         },
       );

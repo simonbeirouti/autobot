@@ -58,6 +58,10 @@ export type RunTask = {
   position: number;
   agentId: string | null;
   agentLabel: string | null;
+  requiredToolkitSlugs: string[];
+  requiredToolIds: string[];
+  executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
+  toolSummary: string | null;
   createdAt: string;
   updatedAt: string;
 };

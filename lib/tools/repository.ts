@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ProjectToolkitSelection,
   ProviderConnection,
+  ToolInvocationStatus,
   ToolkitConnectionStatus,
   UserToolOnboarding,
 } from "@/lib/tools/types";
@@ -269,4 +270,45 @@ export async function replaceProjectToolkitSelections(
   }
 
   return (data ?? []).map((row) => mapProjectToolkitSelection(row as ProjectToolkitSelectionRow));
+}
+
+export async function insertToolInvocation(
+  supabase: SupabaseClient,
+  params: {
+    userId: string;
+    toolkitSlug: string;
+    toolSlug: string;
+    status: ToolInvocationStatus;
+    inputSummary?: string | null;
+    resultSummary?: string | null;
+    projectId?: string | null;
+    objectiveId?: string | null;
+    threadId?: string | null;
+    runId?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("tool_invocations")
+    .insert({
+      user_id: params.userId,
+      project_id: params.projectId ?? null,
+      objective_id: params.objectiveId ?? null,
+      thread_id: params.threadId ?? null,
+      run_id: params.runId ?? null,
+      toolkit_slug: params.toolkitSlug,
+      tool_slug: params.toolSlug,
+      status: params.status,
+      input_summary: params.inputSummary ?? null,
+      result_summary: params.resultSummary ?? null,
+      metadata: params.metadata ?? {},
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.id as string;
 }

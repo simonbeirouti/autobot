@@ -8,7 +8,8 @@ export const dashboardQueryKeys = {
     flow: (draftId: string) => ["draft-flow", draftId] as const,
   },
   projects: {
-    all: ["projects"] as const,
+    all: ["projects", "active"] as const,
+    management: ["projects", "management"] as const,
     workspace: (projectId: string, threadId?: string | null) =>
       ["project-workspace", projectId, threadId ?? "latest"] as const,
   },
@@ -138,6 +139,17 @@ export function upsertProjectInList(
   return nextProjects.toSorted(
     (left, right) => getTimestamp(right.updatedAt) - getTimestamp(left.updatedAt),
   );
+}
+
+export function filterProjectsByStatus(
+  projects: Project[] | undefined,
+  statuses: Project["status"][],
+) {
+  if (!projects) {
+    return [];
+  }
+
+  return projects.filter((project) => statuses.includes(project.status));
 }
 
 export function getProjectsUpdatedAt(projects: Project[]) {

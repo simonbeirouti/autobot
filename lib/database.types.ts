@@ -706,32 +706,41 @@ export type Database = {
       }
       projects: {
         Row: {
+          archived_at: string | null
           company_key: string
           created_at: string
+          deleted_at: string | null
           description: string
           icon_key: string
           id: string
           name: string
+          status: Database["public"]["Enums"]["project_status"]
           updated_at: string
           user_id: string
         }
         Insert: {
+          archived_at?: string | null
           company_key: string
           created_at?: string
+          deleted_at?: string | null
           description?: string
           icon_key?: string
           id?: string
           name: string
+          status?: Database["public"]["Enums"]["project_status"]
           updated_at?: string
           user_id: string
         }
         Update: {
+          archived_at?: string | null
           company_key?: string
           created_at?: string
+          deleted_at?: string | null
           description?: string
           icon_key?: string
           id?: string
           name?: string
+          status?: Database["public"]["Enums"]["project_status"]
           updated_at?: string
           user_id?: string
         }
@@ -857,10 +866,14 @@ export type Database = {
           agent_label: string | null
           created_at: string
           description: string | null
+          execution_strategy: string
           id: string
           position: number
+          required_tool_ids: string[]
+          required_toolkit_slugs: string[]
           run_id: string
           status: Database["public"]["Enums"]["task_status"]
+          tool_summary: string | null
           title: string
           updated_at: string
         }
@@ -869,10 +882,14 @@ export type Database = {
           agent_label?: string | null
           created_at?: string
           description?: string | null
+          execution_strategy?: string
           id?: string
           position?: number
+          required_tool_ids?: string[]
+          required_toolkit_slugs?: string[]
           run_id: string
           status?: Database["public"]["Enums"]["task_status"]
+          tool_summary?: string | null
           title: string
           updated_at?: string
         }
@@ -881,10 +898,14 @@ export type Database = {
           agent_label?: string | null
           created_at?: string
           description?: string | null
+          execution_strategy?: string
           id?: string
           position?: number
+          required_tool_ids?: string[]
+          required_toolkit_slugs?: string[]
           run_id?: string
           status?: Database["public"]["Enums"]["task_status"]
+          tool_summary?: string | null
           title?: string
           updated_at?: string
         }
@@ -1203,6 +1224,7 @@ export type Database = {
         | "preference"
       memory_scope: "company" | "project" | "objective" | "user"
       objective_status: "draft" | "active" | "completed" | "archived"
+      project_status: "active" | "archived" | "deleted"
       run_status:
         | "clarifying"
         | "ready"
@@ -1389,4 +1411,3 @@ export const Constants = {
     },
   },
 } as const
-

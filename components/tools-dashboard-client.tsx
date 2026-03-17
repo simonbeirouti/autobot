@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BlocksIcon,
@@ -57,7 +57,7 @@ function ToolsSplitLayout({
   content: React.ReactNode;
 }) {
   return (
-    <section className="flex h-full min-h-0 min-w-full -mx-4 -my-4 flex-1 flex-col gap-2 overflow-hidden lg:grid lg:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]">
+    <section className="flex h-full min-h-0 min-w-full flex-1 flex-col gap-2 overflow-hidden lg:grid lg:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]">
       {sidebar}
       <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">{content}</div>
     </section>
@@ -605,10 +605,6 @@ export function ToolsDashboardClient({
     },
   });
 
-  if (catalogQuery.isLoading) {
-    return <ToolsDashboardSkeleton />;
-  }
-
   function handleToolkitAction(toolkit: ComposioToolkitRecord, mode: "oauth" | "api_key") {
     if (mode === "api_key") {
       setApiKeyValue("");
@@ -644,6 +640,10 @@ export function ToolsDashboardClient({
       router.replace(buildToolsHref(pathname, openToolkitSlug), { scroll: false });
     });
   }, [connectionResult, openToolkitSlug, pathname, queryClient, router]);
+
+  if (catalogQuery.isLoading) {
+    return <ToolsDashboardSkeleton />;
+  }
 
   return (
     <>
@@ -791,10 +791,7 @@ export function ToolsDashboardClient({
                     </div>
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-                      {toolkitOptions.map((toolkit) => {
-                        const connection = getConnectionPresentation(toolkit);
-
-                        return (
+                      {toolkitOptions.map((toolkit) => (
                           <Card
                             className="cursor-pointer border-border py-0 transition-colors hover:bg-muted focus-within:border-primary focus-within:bg-muted"
                             key={toolkit.slug}
@@ -839,8 +836,7 @@ export function ToolsDashboardClient({
                               />
                             </CardContent>
                           </Card>
-                        );
-                      })}
+                      ))}
                     </div>
                   )}
                 </div>

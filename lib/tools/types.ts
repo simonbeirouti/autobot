@@ -98,3 +98,88 @@ export type ToolOnboardingPayload = {
   onboarding: UserToolOnboarding | null;
   connections: ProviderConnection[];
 };
+
+export type ToolExecutionMode = "read" | "write" | "admin";
+
+export type ToolRiskLevel = "low" | "medium" | "high";
+
+export type ToolInvocationStatus =
+  | "started"
+  | "succeeded"
+  | "failed"
+  | "confirmation_required";
+
+export type ResolvedToolCandidate = {
+  id: string;
+  toolSlug: string;
+  toolkitSlug: string;
+  sessionId: string;
+  title: string;
+  description: string;
+  inputSchema: Record<string, unknown> | null;
+  outputSchema: Record<string, unknown> | null;
+  executionMode: ToolExecutionMode;
+  riskLevel: ToolRiskLevel;
+  supportsChat: boolean;
+  supportsRunTasks: boolean;
+  executionGuidance: string | null;
+};
+
+export type ToolRuntimeContext = {
+  userId: string;
+  projectId: string | null;
+  objectiveId: string | null;
+  threadId: string | null;
+  runId: string | null;
+  allowedToolkitSlugs: string[];
+  confirmedWriteActions?: boolean;
+};
+
+export type ToolRuntimeMissingPrerequisite = {
+  toolkitSlug: string;
+  reason: "not_selected" | "not_connected" | "missing_session";
+  message: string;
+};
+
+export type ResolvedProjectToolRuntime = {
+  selectedToolkitSlugs: string[];
+  activeToolkitSlugs: string[];
+  inactiveToolkitSlugs: string[];
+  markdown: string;
+  toolCandidates: ResolvedToolCandidate[];
+  missingPrerequisites: ToolRuntimeMissingPrerequisite[];
+};
+
+export type ToolExecutionResult = {
+  status: ToolInvocationStatus;
+  toolSlug: string;
+  toolkitSlug: string;
+  message: string;
+  data: Record<string, unknown> | null;
+  logId: string | null;
+};
+
+export type ToolRuntimeEvent =
+  | {
+      type: "tool_call_started";
+      toolName: string;
+      toolkitSlug: string;
+    }
+  | {
+      type: "tool_call_completed";
+      toolName: string;
+      toolkitSlug: string;
+      summary: string;
+    }
+  | {
+      type: "tool_call_failed";
+      toolName: string;
+      toolkitSlug: string;
+      error: string;
+    }
+  | {
+      type: "tool_confirmation_required";
+      toolName: string;
+      toolkitSlug: string;
+      reason: string;
+    };

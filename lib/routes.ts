@@ -1,4 +1,5 @@
 export const DASHBOARD_HOME_ROUTE = "/dashboard";
+export const PROJECTS_ROUTE = "/projects";
 export const PROJECT_ONBOARDING_ROUTE = "/projects/new";
 export const PROVIDER_ONBOARDING_ROUTE = "/onboarding/providers";
 

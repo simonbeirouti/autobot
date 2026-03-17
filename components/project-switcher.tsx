@@ -1,7 +1,12 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { CheckIcon, ChevronsUpDown, FolderKanbanIcon, PlusIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronsUpDown,
+  FolderKanbanIcon,
+  PlusIcon,
+} from "lucide-react";
 
 import { useProject } from "@/components/providers/project-provider";
 import {

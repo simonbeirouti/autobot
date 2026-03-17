@@ -2,8 +2,10 @@ import type { MemoryRecord } from "@/lib/memory/types";
 import type { ProjectToolkitSelection, ProviderConnection } from "@/lib/tools/types";
 
 export const OBJECTIVE_STATUSES = ["draft", "active", "completed", "archived"] as const;
+export const PROJECT_STATUSES = ["active", "archived", "deleted"] as const;
 
 export type ObjectiveStatus = (typeof OBJECTIVE_STATUSES)[number];
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 export type Project = {
   id: string;
@@ -12,6 +14,9 @@ export type Project = {
   name: string;
   description: string;
   iconKey: string;
+  status: ProjectStatus;
+  archivedAt: string | null;
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -104,6 +109,29 @@ export type ProjectChatStreamEvent =
   | {
       type: "token";
       text: string;
+    }
+  | {
+      type: "tool_call_started";
+      toolName: string;
+      toolkitSlug: string;
+    }
+  | {
+      type: "tool_call_completed";
+      toolName: string;
+      toolkitSlug: string;
+      summary: string;
+    }
+  | {
+      type: "tool_call_failed";
+      toolName: string;
+      toolkitSlug: string;
+      error: string;
+    }
+  | {
+      type: "tool_confirmation_required";
+      toolName: string;
+      toolkitSlug: string;
+      reason: string;
     }
   | ({
       type: "final";

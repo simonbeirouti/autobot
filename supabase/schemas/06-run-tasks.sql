@@ -14,6 +14,10 @@ create table if not exists public.run_tasks (
   position integer not null default 0,
   agent_id text,
   agent_label text,
+  required_toolkit_slugs text[] not null default '{}'::text[],
+  required_tool_ids text[] not null default '{}'::text[],
+  execution_strategy text not null default 'analysis_only',
+  tool_summary text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );

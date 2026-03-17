@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense } from "react";
 import { BellIcon } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 import { RouteBreadcrumb } from "@/app/(protected)/route-breadcrumb";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -23,23 +23,10 @@ export function ProtectedLayoutClient({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const { isLoading, projects } = useProject();
+  const { isLoading } = useProject();
 
   const isDashboardRoute = pathname.startsWith("/dashboard");
   const isProjectOnboardingRoute = pathname === PROJECT_ONBOARDING_ROUTE;
-  const shouldRedirectToProjectOnboarding =
-    !isLoading &&
-    projects.length === 0 &&
-    isDashboardRoute;
-
-  useEffect(() => {
-    if (!shouldRedirectToProjectOnboarding) {
-      return;
-    }
-
-    router.replace(PROJECT_ONBOARDING_ROUTE);
-  }, [router, shouldRedirectToProjectOnboarding]);
 
   if (isProjectOnboardingRoute) {
     return (
@@ -47,10 +34,6 @@ export function ProtectedLayoutClient({
         {children}
       </Suspense>
     );
-  }
-
-  if (shouldRedirectToProjectOnboarding) {
-    return <div className="min-h-svh flex-1 bg-background" />;
   }
 
   if (isDashboardRoute && isLoading) {

@@ -162,6 +162,10 @@ export async function insertRunTasks(
     position: number;
     agentId: string | null;
     agentLabel: string | null;
+    requiredToolkitSlugs: string[];
+    requiredToolIds: string[];
+    executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
+    toolSummary: string | null;
   }>,
 ) {
   if (tasks.length === 0) {
@@ -173,11 +177,15 @@ export async function insertRunTasks(
       run_id: task.runId,
       title: task.title,
       description: task.description,
-      status: task.status,
-      position: task.position,
-      agent_id: task.agentId,
-      agent_label: task.agentLabel,
-    })),
+        status: task.status,
+        position: task.position,
+        agent_id: task.agentId,
+        agent_label: task.agentLabel,
+        required_toolkit_slugs: task.requiredToolkitSlugs,
+        required_tool_ids: task.requiredToolIds,
+        execution_strategy: task.executionStrategy,
+        tool_summary: task.toolSummary,
+      })),
   );
 
   if (error) {
@@ -271,7 +279,7 @@ export async function fetchWorkspace(
     await Promise.all([
       supabase
         .from("run_tasks")
-        .select("id, run_id, title, description, status, position, agent_id, agent_label, created_at, updated_at")
+        .select("id, run_id, title, description, status, position, agent_id, agent_label, required_toolkit_slugs, required_tool_ids, execution_strategy, tool_summary, created_at, updated_at")
         .eq("run_id", params.runId)
         .order("position", { ascending: true }),
       supabase
@@ -347,6 +355,10 @@ export async function updateTaskStatuses(
         status: task.status,
         agent_id: task.agentId,
         agent_label: task.agentLabel,
+        required_toolkit_slugs: task.requiredToolkitSlugs,
+        required_tool_ids: task.requiredToolIds,
+        execution_strategy: task.executionStrategy,
+        tool_summary: task.toolSummary,
       })
       .eq("id", task.id)
       .eq("run_id", params.runId);
@@ -354,6 +366,48 @@ export async function updateTaskStatuses(
     if (error) {
       throw error;
     }
+  }
+}
+
+export async function syncRunTasks(
+  supabase: SupabaseClient,
+  params: {
+    runId: string;
+    tasks: RunTask[];
+  },
+) {
+  const { error: deleteError } = await supabase
+    .from("run_tasks")
+    .delete()
+    .eq("run_id", params.runId);
+
+  if (deleteError) {
+    throw deleteError;
+  }
+
+  if (params.tasks.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.from("run_tasks").insert(
+    params.tasks.map((task) => ({
+      id: task.id,
+      run_id: task.runId,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      position: task.position,
+      agent_id: task.agentId,
+      agent_label: task.agentLabel,
+      required_toolkit_slugs: task.requiredToolkitSlugs,
+      required_tool_ids: task.requiredToolIds,
+      execution_strategy: task.executionStrategy,
+      tool_summary: task.toolSummary,
+    })),
+  );
+
+  if (error) {
+    throw error;
   }
 }
 
@@ -394,6 +448,10 @@ function mapTask(row: {
   position: number;
   agent_id: string | null;
   agent_label: string | null;
+  required_toolkit_slugs: string[] | null;
+  required_tool_ids: string[] | null;
+  execution_strategy: "manual_setup" | "tool_execution" | "analysis_only";
+  tool_summary: string | null;
   created_at: string;
   updated_at: string;
 }) {
@@ -406,6 +464,10 @@ function mapTask(row: {
     position: row.position,
     agentId: row.agent_id,
     agentLabel: row.agent_label,
+    requiredToolkitSlugs: row.required_toolkit_slugs ?? [],
+    requiredToolIds: row.required_tool_ids ?? [],
+    executionStrategy: row.execution_strategy,
+    toolSummary: row.tool_summary,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

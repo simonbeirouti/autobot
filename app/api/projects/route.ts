@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { deriveProjectIconKey, resolveCompanyKey } from "@/lib/projects/context";
 import { createProject, fetchProjects } from "@/lib/projects/repository";
+import { PROJECT_STATUSES } from "@/lib/projects/types";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -11,15 +12,26 @@ const createProjectSchema = z.object({
   description: z.string().trim().min(8).max(600),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
     if (!user?.sub) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
+    const requestUrl = new URL(request.url);
+    const includeArchived = requestUrl.searchParams.get("includeArchived") === "true";
+    const rawStatuses = requestUrl.searchParams.getAll("status");
+    const statuses = rawStatuses.filter((status): status is (typeof PROJECT_STATUSES)[number] =>
+      PROJECT_STATUSES.includes(status as (typeof PROJECT_STATUSES)[number]),
+    );
+
     const supabase = await createClient();
-    const projects = await fetchProjects(supabase, { userId: user.sub });
+    const projects = await fetchProjects(supabase, {
+      userId: user.sub,
+      statuses:
+        statuses.length > 0 ? statuses : includeArchived ? ["active", "archived"] : ["active"],
+    });
     return NextResponse.json(projects, {
       headers: {
         "Cache-Control": "private, max-age=30, stale-while-revalidate=300",
