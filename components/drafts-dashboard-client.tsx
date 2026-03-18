@@ -770,7 +770,7 @@ export function DraftsDashboardClient({
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const isRestoring = useIsRestoring();
-  const { activeProject, activeProjectId } = useProject();
+  const { activeProject, activeProjectId, setActiveProjectId } = useProject();
   const requestedDraftId = searchParams.get("draftId");
   const [confirmDeleteDraftId, setConfirmDeleteDraftId] = useState<string | null>(null);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
@@ -1094,8 +1094,11 @@ export function DraftsDashboardClient({
       return { previousFlow };
     },
     onSuccess: async (payload, flow) => {
+      if (flow.draft.projectId) {
+        setActiveProjectId(flow.draft.projectId);
+      }
       queryClient.setQueryData<IntakeDraft[] | undefined>(
-        dashboardQueryKeys.drafts.all(activeProjectId ?? "pending"),
+        dashboardQueryKeys.drafts.all(flow.draft.projectId ?? activeProjectId ?? "pending"),
         (currentDrafts) => currentDrafts?.filter((draft) => draft.id !== flow.draft.id),
       );
       if (payload.runStatus === "blocked" || payload.actionRequired) {

@@ -31,6 +31,21 @@ const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
+function getSidebarOpenFromCookieValue(
+  cookieValue: string | null | undefined,
+  fallbackOpen = true,
+) {
+  if (cookieValue === "true") {
+    return true
+  }
+
+  if (cookieValue === "false") {
+    return false
+  }
+
+  return fallbackOpen
+}
+
 function getCookieValue(name: string) {
   if (typeof document === "undefined") {
     return null
@@ -79,24 +94,18 @@ function SidebarProvider({
 }) {
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
+  const [hasMounted, setHasMounted] = React.useState(false)
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen)
+  const [_open, _setOpen] = React.useState(() =>
+    getSidebarOpenFromCookieValue(getCookieValue(SIDEBAR_COOKIE_NAME), defaultOpen)
+  )
   const open = openProp ?? _open
 
   React.useEffect(() => {
-    if (openProp !== undefined) {
-      return
-    }
-
-    const cookieValue = getCookieValue(SIDEBAR_COOKIE_NAME)
-    if (cookieValue === "true") {
-      _setOpen(true)
-    } else if (cookieValue === "false") {
-      _setOpen(false)
-    }
-  }, [openProp])
+    setHasMounted(true)
+  }, [])
 
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
@@ -155,6 +164,7 @@ function SidebarProvider({
     <SidebarContext.Provider value={contextValue}>
       <div
         data-slot="sidebar-wrapper"
+        data-ready={hasMounted ? "true" : "false"}
         style={
           {
             "--sidebar-width": SIDEBAR_WIDTH,
@@ -243,7 +253,7 @@ function Sidebar({
       <div
         data-slot="sidebar-gap"
         className={cn(
-          "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+          "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear group-data-[ready=false]/sidebar-wrapper:transition-none",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -255,7 +265,7 @@ function Sidebar({
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear group-data-[ready=false]/sidebar-wrapper:transition-none data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"

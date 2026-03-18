@@ -52,7 +52,9 @@ const colorClassMap: Record<string, string> = {
 };
 
 export async function fetchWorkspace(runId: string) {
-  return fetchJson<WorkspacePayload>(`/api/runs/${runId}`);
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}`, {
+    cache: "no-store",
+  });
 }
 
 export async function advanceWorkspace(runId: string) {

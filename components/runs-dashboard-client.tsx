@@ -72,7 +72,9 @@ function getTimestamp(value: string | null | undefined) {
 }
 
 async function fetchRuns(projectId: string) {
-  return fetchJson<RunListItem[]>(`/api/runs?projectId=${projectId}`);
+  return fetchJson<RunListItem[]>(`/api/runs?projectId=${projectId}`, {
+    cache: "no-store",
+  });
 }
 
 function truncateRunTitle(objective: string) {
@@ -288,7 +290,7 @@ export function RunsDashboardClient({
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const isRestoring = useIsRestoring();
-  const { activeProject, activeProjectId } = useProject();
+  const { activeProject, activeProjectId, setActiveProjectId } = useProject();
   const requestedRunId = searchParams.get("runId");
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null);
   const [confirmDeleteRunId, setConfirmDeleteRunId] = useState<string | null>(null);
@@ -314,9 +316,7 @@ export function RunsDashboardClient({
     Boolean(runsQuery.error) && !runsQuery.isLoading && !runsQuery.isFetching;
   const showRunsError = useDelayedVisibility(hasRunsLoadError, ERROR_VISIBILITY_DELAY_MS);
   const selectedRunId =
-    requestedRunId && runs.some((run) => run.id === requestedRunId)
-      ? requestedRunId
-      : initialSelectedRunId ?? runs[0]?.id ?? null;
+    requestedRunId ?? initialSelectedRunId ?? runs[0]?.id ?? null;
   const deferredRunId = useDeferredValue(selectedRunId);
 
   useEffect(() => {
@@ -359,6 +359,26 @@ export function RunsDashboardClient({
         : undefined,
     staleTime: dashboardQueryTimings.runWorkspace.staleTime,
   });
+
+  useEffect(() => {
+    const workspaceProjectId = workspaceQuery.data?.run.projectId ?? null;
+    if (!workspaceProjectId || workspaceProjectId === activeProjectId) {
+      return;
+    }
+
+    setActiveProjectId(workspaceProjectId);
+  }, [activeProjectId, setActiveProjectId, workspaceQuery.data?.run.projectId]);
+
+  useEffect(() => {
+    if (!workspaceQuery.data || !activeProjectId) {
+      return;
+    }
+
+    queryClient.setQueryData<RunListItem[] | undefined>(
+      dashboardQueryKeys.runs.all(activeProjectId),
+      (currentRuns) => mergeRunIntoList(currentRuns, workspaceQuery.data),
+    );
+  }, [activeProjectId, queryClient, workspaceQuery.data]);
 
   const advanceMutation = useMutation({
     mutationFn: () => advanceWorkspace(selectedRunId!),
