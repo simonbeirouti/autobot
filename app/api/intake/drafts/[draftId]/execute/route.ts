@@ -20,6 +20,7 @@ import {
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import { buildProjectToolPreflight } from "@/lib/tools/preflight";
 import { buildMissingToolkitChecklist, resolveProjectToolRuntime } from "@/lib/tools/runtime";
 
 function reindexTasks<T extends { position: number }>(tasks: T[]) {
@@ -99,6 +100,52 @@ export async function POST(
       return NextResponse.json({ error: "Draft is missing a project." }, { status: 409 });
     }
 
+    const toolRuntime = await resolveProjectToolRuntime(supabase, {
+      userId: user.sub,
+      projectId: draft.projectId,
+      query: draft.objective,
+    });
+
+    const previewPayload = buildInitialRunPayload({
+      runId: "preview",
+      sessionId: draft.sessionId,
+      objective: draft.objective,
+      activeToolkitSlugs: toolRuntime.activeToolkitSlugs,
+      selectedToolkitSlugs: toolRuntime.selectedToolkitSlugs,
+      result: {
+        status: "ready_to_execute",
+        summary: draft.clarificationSummary ?? "Draft approved for execution.",
+        confidenceToProceed: draft.confidenceToProceed ?? 0.8,
+        executionMode: draft.executionMode,
+        questions: [],
+        draftMarkdown: draft.draftMarkdown ?? draft.generatedMarkdown ?? "",
+        tasks: draft.taskDrafts,
+        eventNarrative: draft.eventNarrative,
+      },
+    });
+    const toolPreflight = await buildProjectToolPreflight(supabase, {
+      userId: user.sub,
+      projectId: draft.projectId,
+      objective: draft.objective,
+      tasks: previewPayload.tasks.map((task) => ({
+        title: task.title,
+        executionStrategy: task.executionStrategy,
+        toolSummary: task.toolSummary,
+        requiredToolkitSlugs: task.requiredToolkitSlugs,
+      })),
+      nextPath: `/dashboard/drafts?draftId=${draft.id}`,
+    });
+
+    if (toolPreflight.launchState === "blocked") {
+      return NextResponse.json(
+        {
+          error: "Connect the required tools before starting execution.",
+          toolPreflight,
+        },
+        { status: 409 },
+      );
+    }
+
     const run = await createRun(supabase, {
       sessionId: draft.sessionId,
       userId: user.sub,
@@ -107,12 +154,6 @@ export async function POST(
       objective: draft.objective,
       executionMode: draft.executionMode,
       readinessSummary: draft.clarificationSummary ?? "Draft approved for execution.",
-    });
-
-    const toolRuntime = await resolveProjectToolRuntime(supabase, {
-      userId: user.sub,
-      projectId: draft.projectId,
-      query: draft.objective,
     });
 
     const companyKey = resolveCompanyKey({
@@ -142,23 +183,21 @@ export async function POST(
           status: "active",
         });
 
-    const initialPayload = buildInitialRunPayload({
-      runId: run.id,
-      sessionId: draft.sessionId,
-      objective: draft.objective,
-      activeToolkitSlugs: toolRuntime.activeToolkitSlugs,
-      selectedToolkitSlugs: toolRuntime.selectedToolkitSlugs,
-      result: {
-        status: "ready_to_execute",
-        summary: draft.clarificationSummary ?? "Draft approved for execution.",
-        confidenceToProceed: draft.confidenceToProceed ?? 0.8,
-        executionMode: draft.executionMode,
-        questions: [],
-        draftMarkdown: draft.draftMarkdown ?? draft.generatedMarkdown ?? "",
-        tasks: draft.taskDrafts,
-        eventNarrative: draft.eventNarrative,
-      },
-    });
+    const initialPayload = {
+      ...previewPayload,
+      tasks: previewPayload.tasks.map((task) => ({
+        ...task,
+        runId: run.id,
+      })),
+      events: previewPayload.events.map((event) => ({
+        ...event,
+        runId: run.id,
+      })),
+      usage: previewPayload.usage.map((usage) => ({
+        ...usage,
+        runId: run.id,
+      })),
+    };
 
     await appendClarificationMessage(supabase, {
       sessionId: draft.sessionId,
@@ -178,8 +217,23 @@ export async function POST(
           status: item.reason,
           message: item.message,
         })),
+        preflight: {
+          ...toolPreflight,
+          recommendedAction:
+            toolPreflight.recommendedAction
+              ? {
+                  ...toolPreflight.recommendedAction,
+                  href: `/dashboard/runs?runId=${run.id}&connectTools=1`,
+                  target: {
+                    kind: "connect_tools_modal",
+                    href: `/dashboard/runs?runId=${run.id}&connectTools=1`,
+                  },
+                }
+              : null,
+        },
         title: "Connect tools to start this run",
         body: "This run is ready, but it needs provider authentication or setup before execution can begin.",
+        actionHref: `/dashboard/runs?runId=${run.id}&connectTools=1`,
       });
 
       const setupTasks = buildMissingToolkitChecklist(toolRuntime).map((item) => ({

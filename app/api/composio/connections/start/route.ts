@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 
 const startConnectionSchema = z.object({
   toolkitSlug: z.string().trim().min(1),
-  nextPath: z.string().trim().min(1).optional().default("/onboarding/providers"),
+  nextPath: z.string().trim().min(1).optional().default("/dashboard"),
 });
 
 export async function POST(request: Request) {

@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
-import { useMemo, useState } from "react";
+import { startTransition, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { BellIcon, CheckIcon, ChevronRightIcon, InboxIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -23,6 +22,7 @@ import { cn } from "@/lib/utils";
 
 export function NotificationInbox() {
   const [isOpen, setIsOpen] = useState(false);
+  const router = useRouter();
   const notificationsQuery = useNotificationsQuery();
   const markReadMutation = useMarkNotificationReadMutation();
   const dismissMutation = useDismissNotificationMutation({
@@ -43,7 +43,10 @@ export function NotificationInbox() {
     },
   });
 
-  const notifications = notificationsQuery.data ?? [];
+  const notifications = useMemo(
+    () => notificationsQuery.data ?? [],
+    [notificationsQuery.data],
+  );
   const unreadNotifications = useMemo(
     () => notifications.filter((notification) => !notification.isRead),
     [notifications],
@@ -111,7 +114,9 @@ export function NotificationInbox() {
           <ScrollArea className="max-h-[28rem]">
             <div className="space-y-2 p-3">
               {notifications.map((notification) => {
-                const destination = notification.actionHref ?? notification.href;
+                const destination =
+                  notification.actionTarget?.href ?? notification.actionHref ?? notification.href;
+                const actionLabel = notification.actionLabel ?? "Open";
 
                 return (
                   <div
@@ -125,9 +130,9 @@ export function NotificationInbox() {
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
                           {!notification.isRead ? (
-                            <Badge className="bg-amber-500 text-black hover:bg-amber-500">
+                            <span className="inline-flex rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-black">
                               New
-                            </Badge>
+                            </span>
                           ) : null}
                           <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                             {notification.category === "platform_updates"
@@ -156,11 +161,19 @@ export function NotificationInbox() {
 
                     <div className="flex flex-wrap items-center gap-2">
                       {destination ? (
-                        <Button asChild size="sm">
-                          <Link href={destination}>
-                            {notification.actionLabel ?? "Open"}
-                            <ChevronRightIcon className="size-3.5" />
-                          </Link>
+                        <Button
+                          size="sm"
+                          type="button"
+                          onClick={() => {
+                            dismissMutation.mutate(notification.id);
+                            setIsOpen(false);
+                            startTransition(() => {
+                              router.push(destination);
+                            });
+                          }}
+                        >
+                          {actionLabel}
+                          <ChevronRightIcon className="size-3.5" />
                         </Button>
                       ) : null}
                       {notification.isRead ? (

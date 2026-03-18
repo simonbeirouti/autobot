@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { getConfiguredChatModel } from "@/lib/agents/model";
+import { getComposioToolsForToolkit } from "@/lib/tools/catalog";
 import { getComposioSession } from "@/lib/tools/composio";
 import { insertToolInvocation } from "@/lib/tools/repository";
 import type {
@@ -209,6 +210,136 @@ function resolveToolkitReadinessStatus(
   }
 
   return "ready";
+}
+
+const toolkitDiscoverySchema = z.object({
+  requiresTools: z.boolean().default(false),
+  toolkitSlugs: z.array(z.string().min(1)).max(4).default([]),
+  rationale: z.string().max(280).default(""),
+});
+
+const toolkitCandidateDiscoverySchema = z.object({
+  toolkitSlugs: z.array(z.string().min(1)).max(6).default([]),
+  rationale: z.string().max(280).default(""),
+});
+
+async function summarizeToolkitForDiscovery(toolkitSlug: string) {
+  const tools = await getComposioToolsForToolkit(toolkitSlug).catch(() => []);
+  const toolPreview = tools
+    .slice(0, 12)
+    .map((tool) => `${tool.slug}: ${tool.description}`)
+    .join("\n");
+
+  return {
+    toolkitSlug,
+    toolPreview,
+  };
+}
+
+export async function discoverTaskToolkitNeeds(params: {
+  objective: string;
+  taskTitle: string;
+  taskDescription?: string | null;
+  candidateToolkitSlugs: string[];
+}) {
+  if (params.candidateToolkitSlugs.length === 0) {
+    return {
+      requiresTools: false,
+      toolkitSlugs: [],
+      rationale: "",
+    };
+  }
+
+  const model = getConfiguredChatModel();
+  if (!model) {
+    return {
+      requiresTools: false,
+      toolkitSlugs: [],
+      rationale: "",
+    };
+  }
+
+  const toolkitSummaries = await Promise.all(
+    params.candidateToolkitSlugs.map((toolkitSlug) => summarizeToolkitForDiscovery(toolkitSlug)),
+  );
+
+  const structured = model.withStructuredOutput(toolkitDiscoverySchema, {
+    name: "toolkit_discovery",
+    strict: true,
+  });
+  const result = await structured.invoke([
+    new SystemMessage([
+      "Decide whether the task requires external tools and, if so, which provided Composio toolkit slugs are the best fit.",
+      "Only choose from the provided toolkit slugs.",
+      "Return requiresTools=false when the task can be completed without external tools.",
+      "Prefer the minimum set of toolkits needed for execution.",
+    ].join("\n")),
+    new HumanMessage([
+      `Objective: ${params.objective}`,
+      `Task title: ${params.taskTitle}`,
+      params.taskDescription ? `Task description: ${params.taskDescription}` : "",
+      "Available toolkits and example tools:",
+      ...toolkitSummaries.map((summary) =>
+        `Toolkit ${summary.toolkitSlug}\n${summary.toolPreview || "No tool preview available."}`,
+      ),
+    ].filter(Boolean).join("\n\n")),
+  ]);
+
+  return {
+    requiresTools: result.requiresTools,
+    toolkitSlugs: result.toolkitSlugs
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => params.candidateToolkitSlugs.includes(value)),
+    rationale: result.rationale,
+  };
+}
+
+export async function discoverRelevantToolkitCandidates(params: {
+  objective: string;
+  taskTitle: string;
+  taskDescription?: string | null;
+  toolkitCatalog: Array<{
+    slug: string;
+    name: string;
+    description: string | null;
+  }>;
+}) {
+  const model = getConfiguredChatModel();
+  if (!model || params.toolkitCatalog.length === 0) {
+    return {
+      toolkitSlugs: [],
+      rationale: "",
+    };
+  }
+
+  const structured = model.withStructuredOutput(toolkitCandidateDiscoverySchema, {
+    name: "toolkit_candidate_discovery",
+    strict: true,
+  });
+  const result = await structured.invoke([
+    new SystemMessage([
+      "Select the toolkit slugs most likely needed to execute this task.",
+      "Use only the provided toolkit slugs.",
+      "Prefer the smallest possible set.",
+      "Include toolkit slugs even if the user may not have connected them yet.",
+    ].join("\n")),
+    new HumanMessage([
+      `Objective: ${params.objective}`,
+      `Task title: ${params.taskTitle}`,
+      params.taskDescription ? `Task description: ${params.taskDescription}` : "",
+      "Available toolkit catalog:",
+      ...params.toolkitCatalog.map((toolkit) =>
+        `${toolkit.slug} (${toolkit.name})${toolkit.description ? `: ${toolkit.description}` : ""}`,
+      ),
+    ].filter(Boolean).join("\n\n")),
+  ]);
+
+  return {
+    toolkitSlugs: result.toolkitSlugs
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => params.toolkitCatalog.some((toolkit) => toolkit.slug === value)),
+    rationale: result.rationale,
+  };
 }
 
 export function resolveToolkitReadiness(params: {

@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const origin = new URL(request.url).origin;
   const callbackUrl = new URL(request.url);
   const toolkitSlug = callbackUrl.searchParams.get("toolkit");
-  const nextPath = callbackUrl.searchParams.get("next") ?? "/onboarding/providers";
+  const nextPath = callbackUrl.searchParams.get("next") ?? "/dashboard";
   const redirectUrl = new URL(nextPath, origin);
 
   try {

@@ -47,6 +47,8 @@ function mapPreferences(row: NotificationPreferencesRow): NotificationPreference
 }
 
 function mapNotification(row: NotificationRow): NotificationListItem {
+  const metadata = row.metadata ?? {};
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -58,10 +60,14 @@ function mapNotification(row: NotificationRow): NotificationListItem {
     href: row.href,
     actionLabel: row.action_label,
     actionHref: row.action_href,
+    actionTarget:
+      typeof metadata.actionTarget === "object" && metadata.actionTarget !== null
+        ? (metadata.actionTarget as NotificationListItem["actionTarget"])
+        : null,
     readAt: row.read_at,
     dismissedAt: row.dismissed_at,
     dedupeKey: row.dedupe_key,
-    metadata: row.metadata ?? {},
+    metadata,
     createdAt: row.created_at,
     isRead: row.read_at !== null,
   };
@@ -131,14 +137,46 @@ export async function createNotification(
     metadata: params.metadata ?? {},
   };
 
-  const query =
-    params.dedupeKey && params.dedupeKey.length > 0
+  if (params.dedupeKey && params.dedupeKey.length > 0) {
+    const { data: existing, error: existingError } = await supabase
+      .from("notifications")
+      .select("id")
+      .eq("user_id", params.userId)
+      .eq("channel", params.channel)
+      .eq("dedupe_key", params.dedupeKey)
+      .maybeSingle();
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    const query = existing
       ? supabase
           .from("notifications")
-          .upsert(payload, { onConflict: "user_id,channel,dedupe_key" })
+          .update({
+            ...payload,
+            dismissed_at: null,
+            read_at: null,
+          })
+          .eq("id", existing.id)
       : supabase.from("notifications").insert(payload);
 
-  const { data, error } = await query
+    const { data, error } = await query
+      .select(
+        "id, user_id, category, channel, kind, title, body, href, action_label, action_href, read_at, dismissed_at, dedupe_key, metadata, created_at",
+      )
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return mapNotification(data as NotificationRow);
+  }
+
+  const { data, error } = await supabase
+    .from("notifications")
+    .insert(payload)
     .select(
       "id, user_id, category, channel, kind, title, body, href, action_label, action_href, read_at, dismissed_at, dedupe_key, metadata, created_at",
     )
@@ -228,6 +266,28 @@ export async function dismissAllNotifications(
     .eq("user_id", params.userId)
     .eq("channel", "in_app")
     .is("dismissed_at", null);
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function dismissNotificationByDedupeKey(
+  supabase: SupabaseClient,
+  params: { userId: string; dedupeKey: string; channel?: NotificationRecord["channel"] },
+) {
+  const timestamp = new Date().toISOString();
+  let query = supabase
+    .from("notifications")
+    .update({ dismissed_at: timestamp, read_at: timestamp })
+    .eq("user_id", params.userId)
+    .eq("dedupe_key", params.dedupeKey);
+
+  if (params.channel) {
+    query = query.eq("channel", params.channel);
+  }
+
+  const { error } = await query.is("dismissed_at", null);
 
   if (error) {
     throw error;

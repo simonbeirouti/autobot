@@ -20,11 +20,24 @@ const QUERY_SCOPE_STORAGE_KEY = "autobot-query-scope";
 function isPersistedQuery(query: Query) {
   const [namespace, key] = query.queryKey as [string?, string?];
 
+  if (query.state.status !== "success" || query.state.fetchStatus === "fetching") {
+    return false;
+  }
+
   if (namespace === "tools" && key === "onboarding") {
     return false;
   }
 
   if (namespace === "projects" || namespace === "project-workspace") {
+    return false;
+  }
+
+  if (
+    namespace === "draft-flow" ||
+    namespace === "draft-preflight" ||
+    namespace === "run-workspace" ||
+    namespace === "run-preflight"
+  ) {
     return false;
   }
 

@@ -2,20 +2,20 @@
 
 import type { ComponentType } from "react";
 import { useEffect, useRef } from "react";
-import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
   ActivityIcon,
   BotIcon,
   ClipboardListIcon,
-  ExternalLinkIcon,
   PlayIcon,
   WrenchIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
 import {
   Accordion,
   AccordionContent,
@@ -51,9 +51,10 @@ const colorClassMap: Record<string, string> = {
   rose: "text-destructive",
 };
 
-export async function fetchWorkspace(runId: string) {
+export async function fetchWorkspace(runId: string, signal?: AbortSignal) {
   return fetchJson<WorkspacePayload>(`/api/runs/${runId}`, {
     cache: "no-store",
+    signal,
   });
 }
 
@@ -69,6 +70,24 @@ export async function resumeWorkspace(runId: string) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
+}
+
+export function buildRunSearchHref(
+  pathname: string,
+  searchParams: Pick<URLSearchParams, "toString">,
+  params: { runId: string; connectTools?: boolean },
+) {
+  const nextParams = new URLSearchParams(searchParams.toString());
+  nextParams.set("runId", params.runId);
+
+  if (params.connectTools) {
+    nextParams.set("connectTools", "1");
+  } else {
+    nextParams.delete("connectTools");
+  }
+
+  const query = nextParams.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 function groupTasks(tasks: RunTask[]) {
@@ -106,14 +125,20 @@ function buildFallbackActionRequired(data: WorkspacePayload): RunActionRequired 
     title: "Connect tools to continue this run",
     body: "This run has prerequisite setup tasks before tool-backed work can continue.",
     reason: "tool_prerequisites_missing",
+    blockingTaskTitle: null,
     requiredToolkitSlugs,
     readiness: requiredToolkitSlugs.map((toolkitSlug) => ({
       toolkitSlug,
       status: "not_connected",
       message: `${toolkitSlug} is selected for this project but not connected yet.`,
     })),
+    taskToolPlan: data.toolPreflight?.taskToolPlan ?? [],
     actionLabel: "Connect tools",
-    actionHref: `/onboarding/providers?next=${encodeURIComponent(`/dashboard/runs?runId=${data.run.id}`)}`,
+    actionHref: `/dashboard/runs?runId=${data.run.id}&connectTools=1`,
+    actionTarget: {
+      kind: "connect_tools_modal",
+      href: `/dashboard/runs?runId=${data.run.id}&connectTools=1`,
+    },
     resumeLabel: "Resume run",
     canResume: false,
     autoResume: true,
@@ -367,6 +392,9 @@ export function RunWorkspaceView({
   const toolCount = data.usage.filter((item) => item.category === "tool").length;
   const chatCount = data.usage.filter((item) => item.category === "chat").length;
   const actionRequired = buildFallbackActionRequired(data);
+  const blockingToolkits = data.toolPreflight?.toolkits.filter(
+    (toolkit) => toolkit.readiness.status !== "ready",
+  ) ?? [];
 
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
@@ -392,16 +420,25 @@ export function RunWorkspaceView({
                   <div className="space-y-1">
                     <p className="font-semibold text-foreground">{actionRequired.title}</p>
                     <p className="text-muted-foreground">{actionRequired.body}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {actionRequired.actionHref ? (
-                      <Button asChild size="sm">
-                        <Link href={actionRequired.actionHref}>
-                          {actionRequired.actionLabel ?? "Open setup"}
-                          <ExternalLinkIcon className="size-3.5" />
-                        </Link>
-                      </Button>
+                    {actionRequired.blockingTaskTitle ? (
+                      <p className="text-xs text-muted-foreground">
+                        Blocked task: {actionRequired.blockingTaskTitle}
+                      </p>
                     ) : null}
+                  </div>
+                  {data.toolPreflight?.toolkits.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {data.toolPreflight.toolkits.map((toolkit) => (
+                        <Badge
+                          key={toolkit.slug}
+                          variant={toolkit.readiness.status === "ready" ? "default" : "outline"}
+                        >
+                          {toolkit.title}: {toolkit.readiness.status.replaceAll("_", " ")}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
                     {actionRequired.canResume && onResume ? (
                       <Button
                         type="button"
@@ -430,12 +467,50 @@ export function RunWorkspaceView({
       </div>
 
       <div className="grid gap-2 md:grid-cols-2 lg:min-h-0 lg:grid-cols-3">
-          <BoardColumn title="Waiting" tasks={taskColumns.waiting} tone="amber" />
+          <BoardColumn
+            title="Waiting"
+            tasks={taskColumns.waiting}
+            tone="amber"
+            blockedMessage={
+              actionRequired?.reason === "tool_prerequisites_missing"
+                ? "This run is waiting on tool connections before work can continue."
+                : null
+            }
+          />
           <BoardColumn title="Underway" tasks={taskColumns.underway} tone="cyan" />
           <BoardColumn title="Complete" tasks={taskColumns.complete} tone="emerald" />
       </div>
 
-      <Accordion className="min-h-0" collapsible type="single">
+      <Accordion
+        className="min-h-0"
+        defaultValue={
+          actionRequired?.reason === "tool_prerequisites_missing" && blockingToolkits.length > 0
+            ? ["required-apps"]
+            : []
+        }
+        type="multiple"
+      >
+        {actionRequired?.reason === "tool_prerequisites_missing" && blockingToolkits.length > 0 ? (
+          <AccordionItem
+            className="overflow-hidden border border-border bg-background"
+            value="required-apps"
+          >
+            <AccordionTrigger className="w-full border-b px-4 py-3 hover:no-underline">
+              <span className="text-sm font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                Required Apps
+              </span>
+            </AccordionTrigger>
+            <AccordionContent className="pb-0">
+              <div className="p-4">
+                <ToolConnectionChecklist
+                  requiredToolkitSlugs={blockingToolkits.map((toolkit) => toolkit.slug)}
+                  readiness={blockingToolkits.map((toolkit) => toolkit.readiness)}
+                  nextPath={`/dashboard/runs?runId=${data.run.id}`}
+                />
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        ) : null}
         <AccordionItem
           className="overflow-hidden border border-stone-800 bg-stone-950 text-stone-50"
           value="terminal"
@@ -468,22 +543,28 @@ export function RunWorkspace({ runId }: { runId: string }) {
     mutationFn: () => advanceWorkspace(runId),
     onSuccess: (payload) => {
       queryClient.setQueryData(dashboardQueryKeys.runs.workspace(runId), payload);
-      if (payload.run.status === "blocked" || payload.run.actionRequired) {
-        queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.notifications.all,
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.notifications.all,
+      });
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error ? mutationError.message : "Unable to advance run.",
+      );
     },
   });
   const resumeMutation = useMutation({
     mutationFn: () => resumeWorkspace(runId),
     onSuccess: (payload) => {
       queryClient.setQueryData(dashboardQueryKeys.runs.workspace(runId), payload);
-      if (payload.run.status === "blocked" || payload.run.actionRequired) {
-        queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.notifications.all,
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.notifications.all,
+      });
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error ? mutationError.message : "Unable to resume run.",
+      );
     },
   });
 
@@ -492,22 +573,36 @@ export function RunWorkspace({ runId }: { runId: string }) {
       return;
     }
 
-    if (
-      data.run.status === "completed" ||
-      data.run.status === "failed" ||
-      data.run.status === "blocked"
-    ) {
+    if (data.run.status === "completed" || data.run.status === "failed") {
       return;
     }
 
-    const interval = window.setInterval(() => {
+    if (data.run.status === "blocked" && !data.run.actionRequired?.autoResume) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (data.run.status === "blocked" && data.run.actionRequired?.autoResume) {
+        if (!resumeMutation.isPending) {
+          resumeMutation.mutate();
+        }
+        return;
+      }
+
       if (!advanceMutation.isPending) {
         advanceMutation.mutate();
       }
-    }, 3_200);
+    }, 1200);
 
-    return () => window.clearInterval(interval);
-  }, [advanceMutation, data]);
+    return () => window.clearTimeout(timer);
+  }, [
+    advanceMutation,
+    data,
+    data?.run.actionRequired?.autoResume,
+    data?.run.status,
+    data?.run.updatedAt,
+    resumeMutation,
+  ]);
 
   if (isLoading) {
     return <RunWorkspaceSkeleton />;
@@ -526,11 +621,13 @@ export function RunWorkspace({ runId }: { runId: string }) {
   }
 
   return (
-    <RunWorkspaceView
-      data={data}
-      isResuming={resumeMutation.isPending}
-      onResume={() => resumeMutation.mutate()}
-    />
+    <>
+      <RunWorkspaceView
+        data={data}
+        isResuming={resumeMutation.isPending}
+        onResume={() => resumeMutation.mutate()}
+      />
+    </>
   );
 }
 
@@ -562,10 +659,12 @@ function BoardColumn({
   title,
   tasks,
   tone,
+  blockedMessage,
 }: {
   title: string;
   tasks: RunTask[];
   tone: "amber" | "cyan" | "emerald";
+  blockedMessage?: string | null;
 }) {
   return (
     <Card
@@ -586,6 +685,11 @@ function BoardColumn({
       <CardContent className="min-h-0 flex-1 p-0 -mt-4">
         <ScrollArea className="h-full">
           <div className="space-y-3 p-4">
+            {blockedMessage ? (
+              <div className="border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+                {blockedMessage}
+              </div>
+            ) : null}
             {tasks.length === 0 ? (
               <Empty className="border-border">
                 <EmptyHeader>

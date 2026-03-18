@@ -1,4 +1,4 @@
-import type { ToolkitReadinessItem } from "@/lib/tools/types";
+import type { RunToolPreflight, ToolActionTarget, ToolTaskPlanItem, ToolkitReadinessItem } from "@/lib/tools/types";
 
 export const RUN_STATUSES = [
   "clarifying",
@@ -34,10 +34,13 @@ export type RunActionRequired = {
   title: string;
   body: string;
   reason: string;
+  blockingTaskTitle: string | null;
   requiredToolkitSlugs: string[];
   readiness: ToolkitReadinessItem[];
+  taskToolPlan: ToolTaskPlanItem[];
   actionLabel: string | null;
   actionHref: string | null;
+  actionTarget: ToolActionTarget | null;
   resumeLabel: string | null;
   canResume: boolean;
   autoResume: boolean;
@@ -61,6 +64,7 @@ export type ClarificationMessage = {
 export type RunRecord = {
   id: string;
   sessionId: string;
+  userId: string | null;
   projectId: string | null;
   objectiveId: string | null;
   objective: string;
@@ -136,4 +140,5 @@ export type WorkspacePayload = {
   tasks: RunTask[];
   events: RunEvent[];
   usage: UsageRecord[];
+  toolPreflight: RunToolPreflight | null;
 };

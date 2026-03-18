@@ -10,6 +10,30 @@ import {
 import type { IntakeFlowResponse } from "@/lib/intake/types";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import { buildProjectToolPreflight } from "@/lib/tools/preflight";
+
+async function buildDraftToolPreflight(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  draft: IntakeFlowResponse["draft"],
+  userId: string,
+) {
+  if (!draft.projectId) {
+    return null;
+  }
+
+  return buildProjectToolPreflight(supabase, {
+    userId,
+    projectId: draft.projectId,
+    objective: draft.objective,
+    tasks: draft.taskDrafts.map((task) => ({
+      title: task.title,
+      executionStrategy: task.executionStrategy,
+      toolSummary: task.toolSummary || null,
+      requiredToolkitSlugs: task.requiredToolkitSlugs,
+    })),
+    nextPath: `/dashboard/drafts?draftId=${draft.id}`,
+  });
+}
 
 const bodySchema = z.object({
   draftMarkdown: z.string().max(20_000).optional(),
@@ -37,7 +61,11 @@ export async function GET(
     const { draftId } = await context.params;
     const supabase = await createClient();
     const draft = await fetchIntakeDraftWithQuestions(supabase, { draftId, userId: user.sub });
-    const response: IntakeFlowResponse = draft;
+    const toolPreflight = await buildDraftToolPreflight(supabase, draft.draft, user.sub);
+    const response: IntakeFlowResponse = {
+      ...draft,
+      toolPreflight,
+    };
     return NextResponse.json(response);
   } catch (error) {
     return NextResponse.json(
@@ -100,7 +128,8 @@ export async function PATCH(
       userId: user.sub,
     })).questions;
 
-    const response: IntakeFlowResponse = { draft, questions };
+    const toolPreflight = await buildDraftToolPreflight(supabase, draft, user.sub);
+    const response: IntakeFlowResponse = { draft, questions, toolPreflight };
     return NextResponse.json(response);
   } catch (error) {
     return NextResponse.json(

@@ -25,6 +25,7 @@ export async function POST(
 
     return NextResponse.json(nextWorkspace);
   } catch (error) {
+    console.error("[runs.resume] request failed", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to resume run." },
       { status: 500 },

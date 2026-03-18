@@ -1,6 +1,7 @@
 import type { IntakeDraft, IntakeFlowResponse } from "@/lib/intake/types";
 import type { Project, ProjectWorkspace } from "@/lib/projects/types";
 import type { RunListItem, WorkspacePayload } from "@/lib/runs/types";
+import type { RunToolPreflight } from "@/lib/tools/types";
 
 export const dashboardQueryKeys = {
   notifications: {
@@ -10,6 +11,7 @@ export const dashboardQueryKeys = {
   drafts: {
     all: (projectId: string) => ["drafts", projectId] as const,
     flow: (draftId: string) => ["draft-flow", draftId] as const,
+    preflight: (draftId: string) => ["draft-preflight", draftId] as const,
   },
   projects: {
     all: ["projects", "active"] as const,
@@ -20,6 +22,7 @@ export const dashboardQueryKeys = {
   runs: {
     all: (projectId: string) => ["runs", projectId] as const,
     workspace: (runId: string) => ["run-workspace", runId] as const,
+    preflight: (runId: string) => ["run-preflight", runId] as const,
   },
   tools: {
     catalog: ["tools", "catalog"] as const,
@@ -110,6 +113,18 @@ export function mergeRunIntoList(
   return nextRuns.toSorted(
     (left, right) => getTimestamp(right.updatedAt) - getTimestamp(left.updatedAt),
   );
+}
+
+export async function fetchDraftPreflight(draftId: string) {
+  return fetchJson<RunToolPreflight | null>(`/api/intake/drafts/${draftId}/preflight`, {
+    cache: "no-store",
+  });
+}
+
+export async function fetchRunPreflight(runId: string) {
+  return fetchJson<RunToolPreflight | null>(`/api/runs/${runId}/preflight`, {
+    cache: "no-store",
+  });
 }
 
 export function upsertDraftInList(

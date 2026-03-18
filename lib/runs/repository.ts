@@ -15,6 +15,7 @@ import type {
   ExecutionMode,
   RunStatus,
 } from "@/lib/runs/types";
+import { buildProjectToolPreflight } from "@/lib/tools/preflight";
 
 function asObject<T>(value: T) {
   return value;
@@ -79,7 +80,7 @@ export async function fetchRuns(
   let query = supabase
     .from("runs")
     .select(
-      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
+      "id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
     )
     .eq("user_id", params.userId)
     .order("updated_at", { ascending: false });
@@ -104,7 +105,7 @@ export async function fetchLatestRunBySessionId(
   const { data, error } = await supabase
     .from("runs")
     .select(
-      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
+      "id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
     )
     .eq("session_id", params.sessionId)
     .eq("user_id", params.userId)
@@ -145,7 +146,7 @@ export async function createRun(
       readiness_summary: params.readinessSummary,
       action_required: params.actionRequired ?? null,
     })
-    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at")
+    .select("id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at")
     .single();
 
   if (error) {
@@ -291,7 +292,7 @@ export async function fetchWorkspace(
 ) {
   const { data: runRow, error: runError } = await supabase
     .from("runs")
-    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at")
+    .select("id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at")
     .eq("id", params.runId)
     .eq("user_id", params.userId)
     .single();
@@ -329,11 +330,24 @@ export async function fetchWorkspace(
     throw usageError;
   }
 
+  const run = mapRun(runRow);
+  const tasks = (taskRows ?? []).map(mapTask);
+
   return asObject<WorkspacePayload>({
-    run: mapRun(runRow),
-    tasks: (taskRows ?? []).map(mapTask),
+    run,
+    tasks,
     events: (eventRows ?? []).map(mapEvent),
     usage: (usageRows ?? []).map(mapUsage),
+    toolPreflight:
+      run.projectId
+        ? await buildProjectToolPreflight(supabase, {
+            userId: params.userId,
+            projectId: run.projectId,
+            objective: run.objective,
+            tasks,
+            nextPath: `/dashboard/runs?runId=${run.id}`,
+          })
+        : null,
   });
 }
 
@@ -449,7 +463,7 @@ export async function listBlockedRunsForUser(
   const { data, error } = await supabase
     .from("runs")
     .select(
-      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
+      "id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
     )
     .eq("user_id", params.userId)
     .eq("status", "blocked")
@@ -462,8 +476,45 @@ export async function listBlockedRunsForUser(
   return (data ?? []).map(mapRun);
 }
 
+export async function listRunsForWatchdog(
+  supabase: SupabaseClient,
+  params: {
+    userId?: string;
+    statuses?: RunStatus[];
+    limit?: number;
+  },
+) {
+  let query = supabase
+    .from("runs")
+    .select(
+      "id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
+    )
+    .order("updated_at", { ascending: true });
+
+  if (params.userId) {
+    query = query.eq("user_id", params.userId);
+  }
+
+  if (params.statuses && params.statuses.length > 0) {
+    query = query.in("status", params.statuses);
+  }
+
+  if (params.limit) {
+    query = query.limit(params.limit);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapRun);
+}
+
 function mapRun(row: {
   id: string;
+  user_id?: string | null;
   session_id: string;
   project_id: string | null;
   objective_id: string | null;
@@ -479,6 +530,7 @@ function mapRun(row: {
   return {
     id: row.id,
     sessionId: row.session_id,
+    userId: row.user_id ?? null,
     projectId: row.project_id,
     objectiveId: row.objective_id,
     objective: row.objective,

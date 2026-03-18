@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { listNotifications } from "@/lib/notifications/repository";
 import { sendDueRunBlockedEmail } from "@/lib/runs/action-required";
 import { listBlockedRunsForUser } from "@/lib/runs/repository";
+import { sweepRunsWatchdog } from "@/lib/runs/watchdog";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -21,6 +22,10 @@ export async function GET() {
     }
 
     const supabase = await createClient();
+    await sweepRunsWatchdog({
+      supabase,
+      userId: user.sub,
+    });
     const blockedRuns = await listBlockedRunsForUser(supabase, {
       userId: user.sub,
     });

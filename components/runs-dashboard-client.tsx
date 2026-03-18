@@ -9,11 +9,13 @@ import { toast } from "sonner";
 
 import {
   advanceWorkspace,
+  buildRunSearchHref,
   fetchWorkspace,
   resumeWorkspace,
   RunWorkspaceSkeleton,
   RunWorkspaceView,
 } from "@/components/run-workspace";
+import { ToolConnectModal } from "@/components/tool-connect-modal";
 import { useProject } from "@/components/providers/project-provider";
 import {
   WorkspaceSidebarPanel,
@@ -203,7 +205,7 @@ function RunSidebarItem({
               className="shrink-0"
               size="icon"
               type="button"
-              variant="outline"
+              variant="ghost"
               onClick={(event) => event.stopPropagation()}
             >
               <MoreHorizontalIcon className="size-4" />
@@ -292,6 +294,7 @@ export function RunsDashboardClient({
   const isRestoring = useIsRestoring();
   const { activeProject, activeProjectId, setActiveProjectId } = useProject();
   const requestedRunId = searchParams.get("runId");
+  const connectToolsRequested = searchParams.get("connectTools") === "1";
   const [openMenuRunId, setOpenMenuRunId] = useState<string | null>(null);
   const [confirmDeleteRunId, setConfirmDeleteRunId] = useState<string | null>(null);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
@@ -316,7 +319,9 @@ export function RunsDashboardClient({
     Boolean(runsQuery.error) && !runsQuery.isLoading && !runsQuery.isFetching;
   const showRunsError = useDelayedVisibility(hasRunsLoadError, ERROR_VISIBILITY_DELAY_MS);
   const selectedRunId =
-    requestedRunId ?? initialSelectedRunId ?? runs[0]?.id ?? null;
+    requestedRunId && runs.some((run) => run.id === requestedRunId)
+      ? requestedRunId
+      : initialSelectedRunId ?? runs[0]?.id ?? null;
   const deferredRunId = useDeferredValue(selectedRunId);
 
   useEffect(() => {
@@ -349,7 +354,7 @@ export function RunsDashboardClient({
     queryKey: deferredRunId
       ? dashboardQueryKeys.runs.workspace(deferredRunId)
       : dashboardQueryKeys.runs.workspace("pending"),
-    queryFn: () => fetchWorkspace(deferredRunId!),
+    queryFn: ({ signal }) => fetchWorkspace(deferredRunId!, signal),
     enabled: Boolean(deferredRunId),
     initialData:
       initialWorkspace && initialWorkspace.run.id === deferredRunId ? initialWorkspace : undefined,
@@ -390,11 +395,12 @@ export function RunsDashboardClient({
           (currentRuns) => mergeRunIntoList(currentRuns, workspace),
         );
       }
-      if (workspace.run.status === "blocked" || workspace.run.actionRequired) {
-        queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.notifications.all,
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.notifications.all,
+      });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Unable to advance run.");
     },
   });
   const resumeMutation = useMutation({
@@ -407,13 +413,14 @@ export function RunsDashboardClient({
           (currentRuns) => mergeRunIntoList(currentRuns, workspace),
         );
       }
-      if (workspace.run.status === "blocked" || workspace.run.actionRequired) {
-        queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.notifications.all,
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.notifications.all,
+      });
       setOpenMenuRunId(null);
       setConfirmDeleteRunId(null);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Unable to resume run.");
     },
   });
   const stopMutation = useMutation({
@@ -426,11 +433,9 @@ export function RunsDashboardClient({
           (currentRuns) => mergeRunIntoList(currentRuns, workspace),
         );
       }
-      if (workspace.run.status === "blocked" || workspace.run.actionRequired) {
-        queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.notifications.all,
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.notifications.all,
+      });
       setOpenMenuRunId(null);
       setConfirmDeleteRunId(null);
       toast.success("Run stopped.");
@@ -441,7 +446,7 @@ export function RunsDashboardClient({
   });
   const deleteMutation = useMutation({
     mutationFn: (runId: string) => deleteRun(runId),
-    onSuccess: ({ runId }) => {
+    onSuccess: async ({ runId }) => {
       const currentRuns =
         queryClient.getQueryData<RunListItem[]>(
           activeProjectId
@@ -453,20 +458,19 @@ export function RunsDashboardClient({
       if (activeProjectId) {
         queryClient.setQueryData(dashboardQueryKeys.runs.all(activeProjectId), nextRuns);
       }
+      await queryClient.cancelQueries({
+        queryKey: dashboardQueryKeys.runs.workspace(runId),
+        exact: true,
+      });
       queryClient.removeQueries({
         queryKey: dashboardQueryKeys.runs.workspace(runId),
+        exact: true,
       });
       setOpenMenuRunId(null);
       setConfirmDeleteRunId(null);
 
       if (selectedRunId === runId) {
-        const nextRun = nextRuns[0] ?? null;
         startTransition(() => {
-          if (nextRun) {
-            router.replace(buildRunHref(pathname, nextRun.id), { scroll: false });
-            return;
-          }
-
           router.replace(pathname, { scroll: false });
         });
       }
@@ -518,20 +522,44 @@ export function RunsDashboardClient({
 
     if (
       workspaceQuery.data.run.status === "completed" ||
-      workspaceQuery.data.run.status === "failed" ||
-      workspaceQuery.data.run.status === "blocked"
+      workspaceQuery.data.run.status === "failed"
     ) {
       return;
     }
 
-    const interval = window.setInterval(() => {
+    if (
+      workspaceQuery.data.run.status === "blocked" &&
+      !workspaceQuery.data.run.actionRequired?.autoResume
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (
+        workspaceQuery.data?.run.status === "blocked" &&
+        workspaceQuery.data.run.actionRequired?.autoResume
+      ) {
+        if (!resumeMutation.isPending) {
+          resumeMutation.mutate(undefined);
+        }
+        return;
+      }
+
       if (!advanceMutation.isPending) {
         advanceMutation.mutate();
       }
-    }, 3_200);
+    }, 1200);
 
-    return () => window.clearInterval(interval);
-  }, [advanceMutation, selectedRunId, workspaceQuery.data]);
+    return () => window.clearTimeout(timer);
+  }, [
+    advanceMutation,
+    resumeMutation,
+    selectedRunId,
+    workspaceQuery.data,
+    workspaceQuery.data?.run.actionRequired?.autoResume,
+    workspaceQuery.data?.run.status,
+    workspaceQuery.data?.run.updatedAt,
+  ]);
 
   return (
     <WorkspaceSplitLayout
@@ -712,11 +740,59 @@ export function RunsDashboardClient({
             </CardContent>
           </Card>
         ) : (
+          <>
               <RunWorkspaceView
                 data={workspaceQuery.data}
                 isResuming={resumeMutation.isPending}
                 onResume={() => resumeMutation.mutate(selectedRunId ?? undefined)}
               />
+              {workspaceQuery.data.toolPreflight ? (
+                <ToolConnectModal
+                  open={connectToolsRequested}
+                  onOpenChange={(open) => {
+                    if (!selectedRunId) {
+                      return;
+                    }
+
+                    startTransition(() => {
+                      router.replace(
+                        buildRunSearchHref(pathname, searchParams, {
+                          runId: selectedRunId,
+                          connectTools: open,
+                        }),
+                        { scroll: false },
+                      );
+                    });
+                  }}
+                  requiredToolkitSlugs={workspaceQuery.data.toolPreflight.requiredToolkitSlugs}
+                  readiness={workspaceQuery.data.toolPreflight.readiness}
+                  nextPath={buildRunSearchHref(pathname, searchParams, {
+                    runId: selectedRunId,
+                    connectTools: true,
+                  })}
+                  title="Connect tools to continue this run"
+                  description="This run is waiting for tool connections before execution can continue."
+                  onResolved={() => {
+                    if (!selectedRunId) {
+                      return;
+                    }
+
+                    queryClient.invalidateQueries({
+                      queryKey: dashboardQueryKeys.runs.workspace(selectedRunId),
+                    });
+                    queryClient.invalidateQueries({
+                      queryKey: dashboardQueryKeys.notifications.all,
+                    });
+                    if (
+                      workspaceQuery.data.run.status === "blocked" &&
+                      !resumeMutation.isPending
+                    ) {
+                      resumeMutation.mutate(selectedRunId);
+                    }
+                  }}
+                />
+              ) : null}
+          </>
         )
       }
     />

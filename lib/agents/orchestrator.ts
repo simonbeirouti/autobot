@@ -244,43 +244,20 @@ function planTaskTools(params: {
   ClarificationTaskDraft,
   "requiredToolkitSlugs" | "requiredToolIds" | "executionStrategy" | "toolSummary"
 > {
-  const availableToolkitSlugs = (params.availableToolkitSlugs ?? []).map(normalizeToolkitSlug);
-  const selectedToolkitSlugs = (params.selectedToolkitSlugs ?? []).map(normalizeToolkitSlug);
-  const knownToolkitSlugs = Array.from(new Set([...availableToolkitSlugs, ...selectedToolkitSlugs]));
-  const haystack = `${params.objective}\n${params.task.title}\n${params.task.description ?? ""}`.toLowerCase();
-  const matchedToolkits = knownToolkitSlugs.filter((toolkitSlug) => haystack.includes(toolkitSlug));
-  const fallbackToolkit =
-    matchedToolkits.length > 0
-      ? matchedToolkits
-      : params.task.agentId === "operator" && availableToolkitSlugs.length > 0
-        ? availableToolkitSlugs.slice(0, 2)
-        : [];
-
-  const taskText = `${params.task.title} ${params.task.description ?? ""}`.toLowerCase();
-  const likelyToolTask =
-    params.task.agentId === "operator" &&
-    /(execute|send|sync|update|connect|publish|create|deliver|post|upload|integrat)/.test(taskText);
-  const setupTask = /(connect|auth|authorize|api key|credential|login|setup|configure)/.test(taskText);
-
+  const normalizedToolkits = (params.task.requiredToolkitSlugs ?? []).map(normalizeToolkitSlug);
+  const fallbackToolkit = Array.from(new Set(normalizedToolkits));
   const executionStrategy =
-    setupTask
-      ? ("manual_setup" as const)
-      : likelyToolTask && (availableToolkitSlugs.length > 0 || selectedToolkitSlugs.length > 0)
+    params.task.executionStrategy && params.task.executionStrategy !== "analysis_only"
+      ? params.task.executionStrategy
+      : fallbackToolkit.length > 0
         ? ("tool_execution" as const)
         : ("analysis_only" as const);
-
   const toolSummary =
-    executionStrategy === "manual_setup"
-      ? fallbackToolkit.length > 0
-        ? `This task depends on connecting ${fallbackToolkit.join(", ")} before execution can continue.`
-        : "This task is a prerequisite setup step for tool-backed execution."
-      : executionStrategy === "tool_execution"
-        ? fallbackToolkit.length > 0
-          ? `Use connected toolkit(s) ${fallbackToolkit.join(", ")} to complete the task when possible.`
-          : "Use available connected tools to complete the task when possible."
-        : fallbackToolkit.length > 0
-          ? `Tool context to consider: ${fallbackToolkit.join(", ")}.`
-          : "";
+    params.task.toolSummary && params.task.toolSummary.trim().length > 0
+      ? params.task.toolSummary
+      : executionStrategy === "tool_execution" && fallbackToolkit.length > 0
+        ? `Use connected toolkit(s) ${fallbackToolkit.join(", ")} to complete the task when possible.`
+        : "";
 
   return {
     requiredToolkitSlugs: fallbackToolkit,

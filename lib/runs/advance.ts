@@ -8,6 +8,8 @@ import {
   buildToolAuthActionRequired,
   isManualPauseActionRequired,
   isRunAwaitingUserAction,
+  resolveRunAttentionNotification,
+  resolveRunBlockedNotification,
   sendRunBlockedInAppNotification,
 } from "@/lib/runs/action-required";
 import {
@@ -24,6 +26,7 @@ import {
   executeToolAssistedPrompt,
   resolveProjectToolRuntime,
 } from "@/lib/tools/runtime";
+import { buildToolPreflightFromReadiness } from "@/lib/tools/preflight";
 import type { ResolvedProjectToolRuntime, ToolkitReadinessItem } from "@/lib/tools/types";
 
 function createRunEvent(
@@ -80,9 +83,15 @@ function reindexTasks(tasks: RunTask[]) {
 function getTaskRequiredToolkitSlugs(
   task: RunTask,
   fallbackToolRuntime: ResolvedProjectToolRuntime | null,
+  taskPlan?: { title: string; requiredToolkitSlugs: string[] }[] | null,
 ) {
   if (task.requiredToolkitSlugs.length > 0) {
     return task.requiredToolkitSlugs;
+  }
+
+  const plannedMatch = taskPlan?.find((item) => item.title === task.title);
+  if (plannedMatch && plannedMatch.requiredToolkitSlugs.length > 0) {
+    return plannedMatch.requiredToolkitSlugs;
   }
 
   return fallbackToolRuntime?.activeToolkitSlugs ?? [];
@@ -179,12 +188,33 @@ export async function advanceRunWorkspace(params: {
   runId: string;
   force?: boolean;
 }) {
+  console.log("[runs.advance] start", {
+    runId: params.runId,
+    userId: params.user.sub,
+    force: params.force ?? false,
+  });
   const workspace = await fetchWorkspace(params.supabase, {
     runId: params.runId,
     userId: params.user.sub,
   });
 
+  console.log("[runs.advance] workspace loaded", {
+    runId: workspace.run.id,
+    status: workspace.run.status,
+    actionRequired: workspace.run.actionRequired?.reason ?? null,
+    taskStatuses: workspace.tasks.map((task) => ({
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      strategy: task.executionStrategy,
+    })),
+  });
+
   if (workspace.run.status === "completed" || workspace.run.status === "failed") {
+    console.log("[runs.advance] exiting early for terminal status", {
+      runId: workspace.run.id,
+      status: workspace.run.status,
+    });
     return workspace;
   }
 
@@ -198,6 +228,10 @@ export async function advanceRunWorkspace(params: {
       : null;
 
   if (isRunAwaitingUserAction(workspace.run) && !params.force) {
+    console.log("[runs.advance] blocked and not forced, returning current workspace", {
+      runId: workspace.run.id,
+      actionRequired: workspace.run.actionRequired?.reason ?? null,
+    });
     return workspace;
   }
 
@@ -209,6 +243,9 @@ export async function advanceRunWorkspace(params: {
     );
 
     if (isManualPauseActionRequired(workspace.run.actionRequired)) {
+      console.log("[runs.advance] clearing manual pause", {
+        runId: workspace.run.id,
+      });
       await syncRunTasks(params.supabase, {
         runId: workspace.run.id,
         tasks: clearedTasks,
@@ -219,11 +256,23 @@ export async function advanceRunWorkspace(params: {
         status: "ready",
         actionRequired: null,
       });
+      await resolveRunBlockedNotification(params.supabase, {
+        userId: params.user.sub,
+        runId: workspace.run.id,
+      });
 
       currentWorkspace = await fetchWorkspace(params.supabase, {
         runId: params.runId,
         userId: params.user.sub,
       });
+
+      if (params.force) {
+        console.log("[runs.advance] manual pause cleared via force resume", {
+          runId: currentWorkspace.run.id,
+          status: currentWorkspace.run.status,
+        });
+        return currentWorkspace;
+      }
     } else if (toolRuntime) {
       const remaining = getRelevantReadiness(
         toolRuntime,
@@ -231,9 +280,16 @@ export async function advanceRunWorkspace(params: {
       );
 
       if (remaining.some((item) => item.status !== "ready")) {
+        console.log("[runs.advance] still waiting on tool readiness", {
+          runId: workspace.run.id,
+          remaining,
+        });
         return workspace;
       }
 
+      console.log("[runs.advance] clearing tool blocker", {
+        runId: workspace.run.id,
+      });
       await syncRunTasks(params.supabase, {
         runId: workspace.run.id,
         tasks: clearedTasks,
@@ -243,6 +299,10 @@ export async function advanceRunWorkspace(params: {
         userId: params.user.sub,
         status: "ready",
         actionRequired: null,
+      });
+      await resolveRunBlockedNotification(params.supabase, {
+        userId: params.user.sub,
+        runId: workspace.run.id,
       });
 
       currentWorkspace = await fetchWorkspace(params.supabase, {
@@ -263,6 +323,17 @@ export async function advanceRunWorkspace(params: {
     activeToolkitSlugs: toolRuntime?.activeToolkitSlugs ?? [],
   });
 
+  console.log("[runs.advance] execution graph returned", {
+    runId: currentWorkspace.run.id,
+    nextStatus: result.status,
+    tasks: result.tasks.map((task) => ({
+      title: task.title,
+      status: task.status,
+      strategy: task.executionStrategy,
+      requiredToolkitSlugs: task.requiredToolkitSlugs,
+    })),
+  });
+
   let nextTasks = result.tasks;
   let nextEvents = result.events;
   let nextUsage = result.usage;
@@ -273,7 +344,17 @@ export async function advanceRunWorkspace(params: {
   const startedTask = result.tasks.find((task) => task.status === "underway");
 
   if (startedTask && currentWorkspace.run.projectId && toolRuntime) {
-    const requiredToolkitSlugs = getTaskRequiredToolkitSlugs(startedTask, toolRuntime);
+    console.log("[runs.advance] evaluating started task", {
+      runId: currentWorkspace.run.id,
+      taskTitle: startedTask.title,
+      strategy: startedTask.executionStrategy,
+      requiredToolkitSlugs: startedTask.requiredToolkitSlugs,
+    });
+    const requiredToolkitSlugs = getTaskRequiredToolkitSlugs(
+      startedTask,
+      toolRuntime,
+      currentWorkspace.toolPreflight?.taskToolPlan ?? null,
+    );
     const relevantMissingPrerequisites =
       requiredToolkitSlugs.length > 0
         ? toolRuntime.missingPrerequisites.filter((item) =>
@@ -286,21 +367,52 @@ export async function advanceRunWorkspace(params: {
             requiredToolkitSlugs.includes(candidate.toolkitSlug),
           )
         : toolRuntime.toolCandidates;
+    const effectiveExecutionStrategy =
+      startedTask.executionStrategy === "manual_setup" && relevantMissingPrerequisites.length === 0
+        ? taskRuntimeCandidates.length > 0 || requiredToolkitSlugs.length > 0
+          ? ("tool_execution" as const)
+          : ("analysis_only" as const)
+        : startedTask.executionStrategy;
+
+    const shouldBlockForToolReadiness =
+      relevantMissingPrerequisites.length > 0 &&
+      (effectiveExecutionStrategy === "tool_execution" ||
+        startedTask.requiredToolkitSlugs.length > 0 ||
+        taskRuntimeCandidates.length === 0);
 
     if (
-      startedTask.executionStrategy === "manual_setup" ||
-      relevantMissingPrerequisites.length > 0
+      (effectiveExecutionStrategy === "manual_setup" && relevantMissingPrerequisites.length > 0) ||
+      shouldBlockForToolReadiness
     ) {
+      console.log("[runs.advance] blocking on toolkit readiness", {
+        runId: currentWorkspace.run.id,
+        taskTitle: startedTask.title,
+        requiredToolkitSlugs,
+        relevantMissingPrerequisites,
+      });
       const readiness = relevantMissingPrerequisites.map((item) => ({
         toolkitSlug: item.toolkitSlug,
         status: item.reason,
         message: item.message,
       }));
+      const blockedPreflight = buildToolPreflightFromReadiness({
+        tasks: result.tasks.map((task) => ({
+          title: task.title,
+          executionStrategy: task.executionStrategy,
+          toolSummary: task.toolSummary,
+          requiredToolkitSlugs: task.requiredToolkitSlugs,
+        })),
+        readiness: currentWorkspace.toolPreflight?.readiness ?? readiness,
+        nextPath: `/dashboard/runs?runId=${currentWorkspace.run.id}`,
+      });
       const blockedAction = buildToolAuthActionRequired({
         runId: currentWorkspace.run.id,
         readiness,
+        preflight: blockedPreflight,
+        blockingTaskTitle: startedTask.title,
         title: `Connect tools for "${startedTask.title}"`,
         body: `Finish the required provider setup for "${startedTask.title}" to continue this run.`,
+        actionHref: `/dashboard/runs?runId=${currentWorkspace.run.id}&connectTools=1`,
       });
       nextActionRequired = await maybeNotifyBlockedRun({
         supabase: params.supabase,
@@ -349,9 +461,15 @@ export async function advanceRunWorkspace(params: {
         ),
       ];
     } else if (
-      startedTask.executionStrategy === "tool_execution" &&
+      effectiveExecutionStrategy === "tool_execution" &&
       taskRuntimeCandidates.length > 0
     ) {
+      console.log("[runs.advance] executing tool-backed task", {
+        runId: currentWorkspace.run.id,
+        taskTitle: startedTask.title,
+        candidateCount: taskRuntimeCandidates.length,
+        requiredToolkitSlugs,
+      });
       const project = await fetchProject(params.supabase, {
         projectId: currentWorkspace.run.projectId,
         userId: params.user.sub,
@@ -461,11 +579,21 @@ export async function advanceRunWorkspace(params: {
       ];
 
       if (confirmationRequired || toolFailed) {
+        console.log("[runs.advance] tool execution blocked after execution attempt", {
+          runId: currentWorkspace.run.id,
+          taskTitle: startedTask.title,
+          confirmationRequired,
+          toolFailed,
+        });
         nextTasks = result.tasks.map((task) =>
           task.id === startedTask.id ? { ...task, status: "waiting" as const } : task,
         );
         nextStatus = "blocked";
       } else {
+        console.log("[runs.advance] tool execution completed successfully", {
+          runId: currentWorkspace.run.id,
+          taskTitle: startedTask.title,
+        });
         nextTasks = result.tasks.map((task) =>
           task.id === startedTask.id ? { ...task, status: "complete" as const } : task,
         );
@@ -478,14 +606,18 @@ export async function advanceRunWorkspace(params: {
             execution.answer || "All current tasks have moved through execution and review.";
         }
       }
-    } else if (startedTask.executionStrategy === "analysis_only") {
+    } else if (effectiveExecutionStrategy === "analysis_only") {
+      console.log("[runs.advance] completing analysis-only task", {
+        runId: currentWorkspace.run.id,
+        taskTitle: startedTask.title,
+      });
       nextEvents = [
         ...nextEvents,
         createRunEvent(
           currentWorkspace.run.id,
           "agent",
           startedTask.toolSummary || `${startedTask.title} does not require tool execution.`,
-          { taskId: startedTask.id, executionStrategy: startedTask.executionStrategy },
+          { taskId: startedTask.id, executionStrategy: effectiveExecutionStrategy },
         ),
       ];
       nextTasks = result.tasks.map((task) =>
@@ -502,6 +634,11 @@ export async function advanceRunWorkspace(params: {
     runId: currentWorkspace.run.id,
     tasks: nextTasks,
   });
+  console.log("[runs.advance] tasks synced", {
+    runId: currentWorkspace.run.id,
+    nextStatus,
+    actionRequired: nextActionRequired?.reason ?? null,
+  });
   await updateRunStatus(params.supabase, {
     runId: currentWorkspace.run.id,
     userId: params.user.sub,
@@ -509,8 +646,31 @@ export async function advanceRunWorkspace(params: {
     finalSummary: nextFinalSummary,
     actionRequired: nextActionRequired,
   });
+  if (nextStatus !== "blocked" || !nextActionRequired) {
+    await resolveRunBlockedNotification(params.supabase, {
+      userId: params.user.sub,
+      runId: currentWorkspace.run.id,
+    });
+  }
+  const isStillStalled =
+    (nextStatus === "ready" || nextStatus === "running") &&
+    nextTasks.some((task) => task.status === "waiting") &&
+    !nextTasks.some((task) => task.status === "underway");
+  if (!isStillStalled) {
+    await resolveRunAttentionNotification(params.supabase, {
+      userId: params.user.sub,
+      runId: currentWorkspace.run.id,
+    });
+  }
   await insertRunEvents(params.supabase, nextEvents);
   await insertUsageRecords(params.supabase, params.user.sub, nextUsage);
+
+  console.log("[runs.advance] completed", {
+    runId: currentWorkspace.run.id,
+    nextStatus,
+    finalSummary: nextFinalSummary,
+    actionRequired: nextActionRequired?.reason ?? null,
+  });
 
   return fetchWorkspace(params.supabase, {
     runId: params.runId,

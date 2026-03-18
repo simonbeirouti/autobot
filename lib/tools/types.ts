@@ -117,6 +117,39 @@ export type ToolkitReadinessItem = {
   message: string;
 };
 
+export type ToolActionTarget = {
+  kind: "connect_tools_modal";
+  href: string;
+};
+
+export type ToolTaskPlanItem = {
+  title: string;
+  executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
+  toolSummary: string | null;
+  requiredToolkitSlugs: string[];
+};
+
+export type ToolPreflightToolkit = {
+  slug: string;
+  title: string;
+  description: string | null;
+  readiness: ToolkitReadinessItem;
+};
+
+export type RunToolPreflight = {
+  requiredToolkitSlugs: string[];
+  taskToolPlan: ToolTaskPlanItem[];
+  readiness: ToolkitReadinessItem[];
+  blockingToolkitSlugs: string[];
+  launchState: "ready" | "blocked";
+  recommendedAction: {
+    label: string;
+    href: string;
+    target: ToolActionTarget;
+  } | null;
+  toolkits: ToolPreflightToolkit[];
+};
+
 export type ToolInvocationStatus =
   | "started"
   | "succeeded"

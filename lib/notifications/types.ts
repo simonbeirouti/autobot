@@ -1,3 +1,5 @@
+import type { ToolActionTarget } from "@/lib/tools/types";
+
 export const NOTIFICATION_CATEGORIES = ["marketing", "platform_updates"] as const;
 export const NOTIFICATION_CHANNELS = ["email", "in_app"] as const;
 
@@ -24,6 +26,7 @@ export type NotificationRecord = {
   href: string | null;
   actionLabel: string | null;
   actionHref: string | null;
+  actionTarget: ToolActionTarget | null;
   readAt: string | null;
   dismissedAt: string | null;
   dedupeKey: string | null;
