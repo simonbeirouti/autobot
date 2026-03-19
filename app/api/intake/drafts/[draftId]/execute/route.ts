@@ -134,6 +134,7 @@ export async function POST(
         requiredToolkitSlugs: task.requiredToolkitSlugs,
       })),
       nextPath: `/dashboard/drafts?draftId=${draft.id}`,
+      discoverMissingToolkitRequirements: true,
     });
 
     if (toolPreflight.launchState === "blocked") {

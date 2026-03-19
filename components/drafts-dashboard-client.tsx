@@ -13,6 +13,12 @@ import { MarkdownPreview } from "@/components/markdown-preview";
 import { useProject } from "@/components/providers/project-provider";
 import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   WorkspaceSidebarPanel,
   WorkspaceSidebarSkeleton,
   WorkspaceSplitLayout,
@@ -45,6 +51,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -70,6 +77,7 @@ import { cn } from "@/lib/utils";
 
 type DraftWorkspaceMode = "questions" | "tools" | "review";
 type QuestionResponse = IntakeQuestion["response"];
+type ExecuteDraftError = Error & { toolPreflight?: RunToolPreflight | null };
 const ERROR_VISIBILITY_DELAY_MS = 1000;
 const OBJECTIVE_START_SUCCESS_STORAGE_KEY = "autobot-objective-intake-started";
 const DRAFT_SUMMARY_FALLBACK =
@@ -281,6 +289,77 @@ function getDraftWorkspaceSummary(draft: Pick<IntakeDraft, "clarificationSummary
   return draft.clarificationSummary ?? DRAFT_SUMMARY_FALLBACK;
 }
 
+function getToolkitReadinessMeta(status: RunToolPreflight["readiness"][number]["status"]) {
+  switch (status) {
+    case "ready":
+      return {
+        badgeVariant: "default" as const,
+        label: "Connected",
+      };
+    case "auth_in_progress":
+      return {
+        badgeVariant: "secondary" as const,
+        label: "Auth in progress",
+      };
+    case "missing_session":
+      return {
+        badgeVariant: "outline" as const,
+        label: "Needs setup",
+      };
+    case "confirmation_required":
+      return {
+        badgeVariant: "outline" as const,
+        label: "Needs confirmation",
+      };
+    case "not_connected":
+    case "not_selected":
+    default:
+      return {
+        badgeVariant: "outline" as const,
+        label: "Not connected",
+      };
+  }
+}
+
+function getTaskConnectionMeta(
+  task: RunToolPreflight["taskToolPlan"][number],
+  readinessByToolkit: Map<string, RunToolPreflight["readiness"][number]>,
+) {
+  if (task.requiredToolkitSlugs.length === 0) {
+    return {
+      badgeVariant: "secondary" as const,
+      label: "No apps needed",
+    };
+  }
+
+  const readinessItems = task.requiredToolkitSlugs
+    .map((toolkitSlug) => readinessByToolkit.get(toolkitSlug))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const connectedCount = readinessItems.filter((item) => item.status === "ready").length;
+
+  if (connectedCount === readinessItems.length && readinessItems.length > 0) {
+    return {
+      badgeVariant: "default" as const,
+      label: "Ready",
+    };
+  }
+
+  if (connectedCount > 0) {
+    return {
+      badgeVariant: "secondary" as const,
+      label: `${connectedCount}/${readinessItems.length} connected`,
+    };
+  }
+
+  return {
+    badgeVariant: "outline" as const,
+    label:
+      task.requiredToolkitSlugs.length > 1
+        ? "App options need setup"
+        : "Needs setup",
+  };
+}
+
 function DraftListItem({
   draft,
   isActive,
@@ -416,6 +495,9 @@ function DraftWorkspaceView({
   const launchBlocked = toolPreflight?.launchState === "blocked";
   const requiresToolReview = launchBlocked;
   const questionAnswersChanged = haveAnswersChanged(generatedAnswers, answers);
+  const readinessByToolkit = new Map(
+    (toolPreflight?.readiness ?? []).map((item) => [item.toolkitSlug, item]),
+  );
 
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_minmax(0,1fr)] xl:overflow-hidden">
@@ -752,79 +834,89 @@ function DraftWorkspaceView({
         ) : mode === "tools" ? (
           <Card className="flex min-h-[320px] flex-col xl:h-full xl:min-h-0">
             <CardHeader>
-              <CardTitle className="text-base">Required apps</CardTitle>
+              <div className="flex items-start justify-between gap-3">
+                <CardTitle className="text-base">Required apps</CardTitle>
+                <Badge variant={launchBlocked ? "outline" : "default"}>
+                  {launchBlocked ? "Launch blocked" : "Ready"}
+                </Badge>
+              </div>
               <CardDescription>
                 Connect any missing apps before continuing to the generated draft.
               </CardDescription>
+              {toolPreflight?.toolkits.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {toolPreflight.toolkits.map((toolkit) => {
+                    const readinessMeta = getToolkitReadinessMeta(toolkit.readiness.status);
+
+                    return (
+                      <Badge key={toolkit.slug} variant={readinessMeta.badgeVariant}>
+                        {toolkit.title}: {readinessMeta.label}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              ) : null}
             </CardHeader>
             <CardContent className="flex flex-1 flex-col space-y-4 xl:min-h-0">
               {toolPreflight && toolPreflight.taskToolPlan.length > 0 ? (
-                <div className="space-y-3 border p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold">Tool requirements</p>
-                      <p className="text-sm text-muted-foreground">
-                        AutoBot expects to use these toolkits while executing this objective.
-                      </p>
-                    </div>
-                    <Badge variant={launchBlocked ? "outline" : "default"}>
-                      {launchBlocked ? "Launch blocked" : "Ready"}
-                    </Badge>
-                  </div>
+                <ScrollArea className="min-h-0 flex-1">
+                  <div className="space-y-4">
+                    <Accordion collapsible className="border" type="single">
+                      {toolPreflight.taskToolPlan.map((task, index) => {
+                        const taskConnectionMeta = getTaskConnectionMeta(task, readinessByToolkit);
 
-                  {toolPreflight.toolkits.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {toolPreflight.toolkits.map((toolkit) => (
-                        <Badge
-                          key={toolkit.slug}
-                          variant={toolkit.readiness.status === "ready" ? "default" : "outline"}
-                        >
-                          {toolkit.title}: {toolkit.readiness.status.replaceAll("_", " ")}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  <div className="space-y-2">
-                    {toolPreflight.taskToolPlan.map((task) => (
-                      <div className="border p-3 text-sm" key={`${task.title}-${task.executionStrategy}`}>
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-medium">{task.title}</p>
-                          <Badge variant="secondary">{task.executionStrategy.replaceAll("_", " ")}</Badge>
-                        </div>
-                        {task.toolSummary ? (
-                          <p className="mt-2 text-muted-foreground">{task.toolSummary}</p>
-                        ) : null}
-                        {task.requiredToolkitSlugs.length > 0 ? (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {task.requiredToolkitSlugs.map((toolkitSlug) => (
-                              <Badge key={toolkitSlug} variant="outline">
-                                {toolkitSlug}
-                              </Badge>
-                            ))}
-                          </div>
-                        ) : null}
+                        return (
+                          <AccordionItem
+                            key={`${task.title}-${index}`}
+                            value={`${task.title}-${index}`}
+                          >
+                            <AccordionTrigger className="px-4 py-4 text-left hover:no-underline">
+                              <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+                                <div className="min-w-0 space-y-1">
+                                  <p className="text-sm font-medium">{task.title}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {task.requiredToolkitSlugs.length > 1
+                                      ? `Review the app options for this step.`
+                                      : task.requiredToolkitSlugs.length === 1
+                                        ? "Review the app needed for this step."
+                                        : "No additional app connection is required for this step."}
+                                  </p>
+                                </div>
+                                <Badge variant={taskConnectionMeta.badgeVariant}>
+                                  {taskConnectionMeta.label}
+                                </Badge>
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent className="px-4 pb-4">
+                              <div className="space-y-2 text-sm">
+                                {task.toolSummary ? (
+                                  <p className="text-muted-foreground">{task.toolSummary}</p>
+                                ) : null}
+                                {task.requiredToolkitSlugs.length > 1 ? (
+                                  <p className="text-muted-foreground">
+                                    More than one app may work for this step. Connect the best fit for your workflow.
+                                  </p>
+                                ) : null}
+                                {task.requiredToolkitSlugs.length > 0 ? (
+                                  <ToolConnectionChecklist
+                                    nextPath={`/dashboard/drafts?draftId=${flow.draft.id}`}
+                                    readiness={toolPreflight.readiness}
+                                    requiredToolkitSlugs={task.requiredToolkitSlugs}
+                                  />
+                                ) : null}
+                              </div>
+                            </AccordionContent>
+                          </AccordionItem>
+                        );
+                      })}
+                    </Accordion>
+                    {!launchBlocked ? (
+                      <div className="border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-muted-foreground">
+                        No missing app connections. You can continue to the draft markdown.
                       </div>
-                    ))}
+                    ) : null}
                   </div>
-
-                  {launchBlocked ? (
-                    <div className="space-y-3 border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-                      <p className="text-muted-foreground">
-                        Connect the required apps below before continuing.
-                      </p>
-                      <ToolConnectionChecklist
-                        requiredToolkitSlugs={toolPreflight.blockingToolkitSlugs}
-                        readiness={toolPreflight.readiness}
-                        nextPath={`/dashboard/drafts?draftId=${flow.draft.id}`}
-                      />
-                    </div>
-                  ) : (
-                    <div className="border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-muted-foreground">
-                      No missing app connections. You can continue to the draft markdown.
-                    </div>
-                  )}
-                </div>
+                </ScrollArea>
               ) : (
                 <div className="rounded-lg border p-4 text-sm text-muted-foreground">
                   No apps are required for this objective. You can continue to the draft markdown.
@@ -1282,15 +1374,27 @@ export function DraftsDashboardClient({
   });
 
   const startExecution = useMutation({
-    mutationFn: async (flow: IntakeFlowResponse) =>
-      fetchJson<{
+    mutationFn: async (flow: IntakeFlowResponse) => {
+      const response = await fetch(`/api/intake/drafts/${flow.draft.id}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        const error = new Error(
+          payload?.error ?? "Unable to start execution.",
+        ) as ExecuteDraftError;
+        error.toolPreflight = payload?.toolPreflight ?? null;
+        throw error;
+      }
+
+      return payload as {
         runId: string;
         runStatus?: "ready" | "blocked" | "running" | "completed" | "failed" | "clarifying";
         actionRequired?: unknown;
-      }>(`/api/intake/drafts/${flow.draft.id}/execute`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      }),
+      };
+    },
     onMutate: async (flow) => {
       setError(null);
       await queryClient.cancelQueries({ queryKey: dashboardQueryKeys.drafts.flow(flow.draft.id) });
@@ -1334,7 +1438,18 @@ export function DraftsDashboardClient({
       });
     },
     onError: (executeError, flow, context) => {
-      if (context?.previousFlow) {
+      const preflight =
+        executeError instanceof Error && "toolPreflight" in executeError
+          ? (executeError as ExecuteDraftError).toolPreflight
+          : null;
+
+      if (preflight) {
+        syncFlow({
+          ...flow,
+          toolPreflight: preflight,
+        });
+        setMode("tools");
+      } else if (context?.previousFlow) {
         syncFlow(context.previousFlow);
       }
 

@@ -2,16 +2,26 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2Icon, Link2Icon, RefreshCcwIcon } from "lucide-react";
+import { CheckCircle2Icon, ExternalLinkIcon, Link2Icon, RefreshCcwIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { dashboardQueryKeys, dashboardQueryTimings, fetchJson } from "@/lib/query/dashboard";
-import type { ToolOnboardingPayload, ToolkitReadinessItem } from "@/lib/tools/types";
+import type {
+  ComposioToolCatalog,
+  ToolOnboardingPayload,
+  ToolkitReadinessItem,
+} from "@/lib/tools/types";
+import { cn } from "@/lib/utils";
 
 async function fetchToolOnboarding() {
   return fetchJson<ToolOnboardingPayload & { defaultToolkitSlugs: string[] }>("/api/tool-onboarding", {
+    cache: "no-store",
+  });
+}
+
+async function fetchToolsCatalog() {
+  return fetchJson<ComposioToolCatalog>("/api/tools", {
     cache: "no-store",
   });
 }
@@ -61,15 +71,6 @@ function getReadinessFromConnection(
   };
 }
 
-const statusLabelMap = {
-  ready: "Ready",
-  not_connected: "Not connected",
-  auth_in_progress: "Auth in progress",
-  missing_session: "Needs resync",
-  confirmation_required: "Confirmation required",
-  not_selected: "Not selected",
-} as const;
-
 export function ToolConnectionChecklist({
   requiredToolkitSlugs,
   readiness,
@@ -86,6 +87,11 @@ export function ToolConnectionChecklist({
     queryKey: dashboardQueryKeys.tools.onboarding,
     queryFn: fetchToolOnboarding,
     staleTime: dashboardQueryTimings.toolOnboarding.staleTime,
+  });
+  const catalogQuery = useQuery({
+    queryKey: dashboardQueryKeys.tools.catalog,
+    queryFn: fetchToolsCatalog,
+    staleTime: dashboardQueryTimings.tools.staleTime,
   });
 
   const startConnectionMutation = useMutation({
@@ -132,9 +138,11 @@ export function ToolConnectionChecklist({
 
   const toolkitCards = useMemo(() => {
     const payload = onboardingQuery.data;
+    const catalog = catalogQuery.data;
 
     return requiredToolkitSlugs.map((toolkitSlug) => {
       const meta = payload?.recommendedToolkits.find((item) => item.slug === toolkitSlug);
+      const toolkit = catalog?.toolkits.find((item) => item.slug === toolkitSlug);
       const liveReadiness =
         payload ? getReadinessFromConnection(toolkitSlug, payload.connections) : null;
       const fallbackReadiness =
@@ -147,12 +155,18 @@ export function ToolConnectionChecklist({
 
       return {
         slug: toolkitSlug,
-        title: meta?.title ?? toolkitSlug,
-        description: meta?.description ?? null,
+        title: toolkit?.name ?? meta?.title ?? toolkitSlug,
+        description:
+          toolkit?.description ??
+          meta?.description ??
+          "No description available for this toolkit yet.",
+        logoUrl: toolkit?.logoUrl ?? null,
+        appUrl: toolkit?.appUrl ?? null,
+        toolCount: toolkit?.toolCount ?? null,
         readiness: effectiveReadiness,
       };
     });
-  }, [onboardingQuery.data, readiness, requiredToolkitSlugs]);
+  }, [catalogQuery.data, onboardingQuery.data, readiness, requiredToolkitSlugs]);
 
   const allReady =
     toolkitCards.length > 0 && toolkitCards.every((item) => item.readiness.status === "ready");
@@ -174,49 +188,82 @@ export function ToolConnectionChecklist({
   }, [allReady]);
 
   return (
-    <div className="space-y-3">
+    <div
+      className={cn(
+        "grid gap-2",
+        toolkitCards.length === 2 ? "md:grid-cols-2" : "grid-cols-1",
+      )}
+    >
       {toolkitCards.map((toolkit) => (
-        <div className="space-y-3 border p-4" key={toolkit.slug}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold">{toolkit.title}</p>
-                <Badge variant={toolkit.readiness.status === "ready" ? "default" : "outline"}>
-                  {statusLabelMap[toolkit.readiness.status]}
-                </Badge>
+        <div className="border bg-background p-4" key={toolkit.slug}>
+          <div className="flex min-h-[112px] flex-col justify-between gap-4">
+            <div className="flex items-start gap-4 text-left">
+              {toolkit.logoUrl ? (
+                <img
+                  alt={`${toolkit.title} logo`}
+                  className="size-12 shrink-0 border object-contain p-2"
+                  height={48}
+                  src={toolkit.logoUrl}
+                  width={48}
+                />
+              ) : (
+                <div className="flex size-12 shrink-0 items-center justify-center border bg-muted text-lg font-semibold text-foreground">
+                  <span aria-hidden="true">{toolkit.title.trim().charAt(0).toUpperCase() || "?"}</span>
+                  <span className="sr-only">{toolkit.title}</span>
+                </div>
+              )}
+
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h3 className="truncate text-base font-semibold">{toolkit.title}</h3>
+                    {toolkit.appUrl ? (
+                      <a href={toolkit.appUrl}>
+                        <ExternalLinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                      </a>
+                    ) : null}
+                  </div>
+                  <p className="shrink-0 text-xs text-muted-foreground">
+                    {toolkit.toolCount !== null ? `${toolkit.toolCount} tools` : null}
+                  </p>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {toolkit.description}
+                </p>
               </div>
-              {toolkit.description ? (
-                <p className="text-sm text-muted-foreground">{toolkit.description}</p>
-              ) : null}
-              <p className="text-xs text-muted-foreground">{toolkit.readiness.message}</p>
             </div>
 
-            {toolkit.readiness.status === "ready" ? (
-              <CheckCircle2Icon className="mt-0.5 size-4 text-emerald-600" />
-            ) : (
-              <Link2Icon className="mt-0.5 size-4 text-muted-foreground" />
-            )}
-          </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                {toolkit.readiness.status === "ready" ? (
+                  <CheckCircle2Icon className="size-3.5" />
+                ) : (
+                  <Link2Icon className="size-3.5" />
+                )}
+                <span className="truncate">{toolkit.readiness.message}</span>
+              </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              type="button"
-              onClick={() => startConnectionMutation.mutate(toolkit.slug)}
-              disabled={startConnectionMutation.isPending}
-            >
-              {toolkit.readiness.status === "ready" ? "Reconnect" : "Connect"}
-            </Button>
-            <Button
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={() => syncConnectionMutation.mutate(toolkit.slug)}
-              disabled={syncConnectionMutation.isPending}
-            >
-              <RefreshCcwIcon className="size-3.5" />
-              Resync
-            </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  type="button"
+                  onClick={() => startConnectionMutation.mutate(toolkit.slug)}
+                  disabled={startConnectionMutation.isPending}
+                >
+                  {toolkit.readiness.status === "ready" ? "Reconnect" : "Connect"}
+                </Button>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => syncConnectionMutation.mutate(toolkit.slug)}
+                  disabled={syncConnectionMutation.isPending}
+                >
+                  <RefreshCcwIcon className="size-3.5" />
+                  Resync
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       ))}

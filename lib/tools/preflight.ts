@@ -15,7 +15,7 @@ import type {
   ToolkitReadinessItem,
 } from "@/lib/tools/types";
 
-type ToolPlanningTask = {
+export type ToolPlanningTask = {
   title: string;
   description?: string | null;
   executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
@@ -111,16 +111,16 @@ export function buildToolPreflightFromReadiness(params: {
   };
 }
 
-export async function buildProjectToolPreflight(
+async function resolveProjectToolPlanningContext(
   supabase: SupabaseClient,
   params: {
     userId: string;
     projectId: string;
     objective: string;
     tasks: ToolPlanningTask[];
-    nextPath: string;
+    discoverMissingToolkitRequirements?: boolean;
   },
-): Promise<RunToolPreflight> {
+){
   const [providerConnections, projectTools] = await Promise.all([
     fetchProviderConnections(supabase, {
       userId: params.userId,
@@ -136,50 +136,89 @@ export async function buildProjectToolPreflight(
     name: toolkit.name,
     description: toolkit.description,
   }));
-  const discoveredTasks = await Promise.all(
-    params.tasks.map(async (task) => {
-      if (task.requiredToolkitSlugs.length > 0) {
-        return task;
-      }
+  const shouldDiscoverMissingToolkitRequirements =
+    params.discoverMissingToolkitRequirements ?? false;
+  const discoveredTasks = shouldDiscoverMissingToolkitRequirements
+    ? await Promise.all(
+        params.tasks.map(async (task) => {
+          if (task.requiredToolkitSlugs.length > 0) {
+            return task;
+          }
 
-      const candidateToolkitSlugs = Array.from(
-        new Set([
-          ...projectTools.selectedToolkitSlugs,
-          ...(
-            await discoverRelevantToolkitCandidates({
-              objective: params.objective,
-              taskTitle: task.title,
-              taskDescription: task.description ?? task.toolSummary ?? null,
-              toolkitCatalog,
-            }).then((result) => result.toolkitSlugs)
-          ),
-        ]),
-      );
+          const candidateToolkitSlugs = Array.from(
+            new Set([
+              ...projectTools.selectedToolkitSlugs,
+              ...(
+                await discoverRelevantToolkitCandidates({
+                  objective: params.objective,
+                  taskTitle: task.title,
+                  taskDescription: task.description ?? task.toolSummary ?? null,
+                  toolkitCatalog,
+                }).then((result) => result.toolkitSlugs)
+              ),
+            ]),
+          );
 
-      const discovery = await discoverTaskToolkitNeeds({
-        objective: params.objective,
-        taskTitle: task.title,
-        taskDescription: task.description ?? task.toolSummary ?? null,
-        candidateToolkitSlugs,
-      }).catch(() => ({
-        requiresTools: false,
-        toolkitSlugs: [] as string[],
-        rationale: "",
-      }));
+          const discovery = await discoverTaskToolkitNeeds({
+            objective: params.objective,
+            taskTitle: task.title,
+            taskDescription: task.description ?? task.toolSummary ?? null,
+            candidateToolkitSlugs,
+          }).catch(() => ({
+            requiresTools: false,
+            toolkitSlugs: [] as string[],
+            rationale: "",
+          }));
 
-      return {
-        ...task,
-        requiredToolkitSlugs: discovery.requiresTools ? discovery.toolkitSlugs : [],
-        executionStrategy:
-          discovery.requiresTools && discovery.toolkitSlugs.length > 0
-            ? ("tool_execution" as const)
-            : task.executionStrategy,
-        toolSummary:
-          discovery.requiresTools && discovery.toolkitSlugs.length > 0
-            ? discovery.rationale || task.toolSummary
-            : task.toolSummary,
-      };
-    }),
+          return {
+            ...task,
+            requiredToolkitSlugs: discovery.requiresTools ? discovery.toolkitSlugs : [],
+            executionStrategy:
+              discovery.requiresTools && discovery.toolkitSlugs.length > 0
+                ? ("tool_execution" as const)
+                : task.executionStrategy,
+            toolSummary:
+              discovery.requiresTools && discovery.toolkitSlugs.length > 0
+                ? discovery.rationale || task.toolSummary
+                : task.toolSummary,
+          };
+        }),
+      )
+    : params.tasks;
+  return {
+    discoveredTasks,
+    providerConnections,
+  };
+}
+
+export async function resolveProjectToolPlanningTasks(
+  supabase: SupabaseClient,
+  params: {
+    userId: string;
+    projectId: string;
+    objective: string;
+    tasks: ToolPlanningTask[];
+    discoverMissingToolkitRequirements?: boolean;
+  },
+) {
+  const { discoveredTasks } = await resolveProjectToolPlanningContext(supabase, params);
+  return discoveredTasks;
+}
+
+export async function buildProjectToolPreflight(
+  supabase: SupabaseClient,
+  params: {
+    userId: string;
+    projectId: string;
+    objective: string;
+    tasks: ToolPlanningTask[];
+    nextPath: string;
+    discoverMissingToolkitRequirements?: boolean;
+  },
+): Promise<RunToolPreflight> {
+  const { discoveredTasks, providerConnections } = await resolveProjectToolPlanningContext(
+    supabase,
+    params,
   );
   const requiredToolkitSlugs = Array.from(
     new Set(

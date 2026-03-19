@@ -15,6 +15,10 @@ import {
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import {
+  buildProjectToolPreflight,
+  resolveProjectToolPlanningTasks,
+} from "@/lib/tools/preflight";
 
 const bodySchema = z.object({
   projectId: z.string().uuid(),
@@ -75,6 +79,28 @@ export async function POST(request: Request) {
     });
 
     const isReviewReady = result.status === "ready_to_execute";
+    const taskDrafts = isReviewReady
+      ? (
+          await resolveProjectToolPlanningTasks(supabase, {
+            userId: user.sub,
+            projectId: payload.projectId,
+            objective: payload.objective,
+            tasks: result.tasks.map((task) => ({
+              title: task.title,
+              description: task.description,
+              executionStrategy: task.executionStrategy,
+              toolSummary: task.toolSummary || null,
+              requiredToolkitSlugs: task.requiredToolkitSlugs,
+            })),
+            discoverMissingToolkitRequirements: true,
+          })
+        ).map((task, index) => ({
+          ...result.tasks[index],
+          executionStrategy: task.executionStrategy,
+          toolSummary: task.toolSummary ?? result.tasks[index]?.toolSummary ?? "",
+          requiredToolkitSlugs: task.requiredToolkitSlugs,
+        }))
+      : result.tasks;
     const savedQuestions = await replaceIntakeQuestions(supabase, {
       draftId: draft.id,
       questions: result.questions,
@@ -91,11 +117,27 @@ export async function POST(request: Request) {
         questionCount: result.questions.length,
         generatedMarkdown: result.draftMarkdown || null,
         draftMarkdown: result.draftMarkdown || null,
-        taskDrafts: result.tasks,
+        taskDrafts,
         eventNarrative: result.eventNarrative,
         lastGeneratedAt: isReviewReady ? new Date().toISOString() : null,
       },
     });
+    const toolPreflight =
+      isReviewReady
+        ? await buildProjectToolPreflight(supabase, {
+            userId: user.sub,
+            projectId: payload.projectId,
+            objective: payload.objective,
+            tasks: taskDrafts.map((task) => ({
+              title: task.title,
+              description: task.description,
+              executionStrategy: task.executionStrategy,
+              toolSummary: task.toolSummary || null,
+              requiredToolkitSlugs: task.requiredToolkitSlugs,
+            })),
+            nextPath: `/dashboard/drafts?draftId=${draft.id}`,
+          })
+        : null;
 
     await insertUsageRecords(supabase, user.sub, [
       {
@@ -116,6 +158,7 @@ export async function POST(request: Request) {
     const response: IntakeFlowResponse = {
       draft: savedDraft,
       questions: savedQuestions,
+      toolPreflight,
     };
 
     return NextResponse.json(response);

@@ -17,6 +17,10 @@ import {
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import {
+  buildProjectToolPreflight,
+  resolveProjectToolPlanningTasks,
+} from "@/lib/tools/preflight";
 
 const bodySchema = z.object({
   draftId: z.string().uuid(),
@@ -168,6 +172,29 @@ export async function POST(request: Request) {
     });
 
     const isReviewReady = result.status === "ready_to_execute";
+    const taskDrafts =
+      isReviewReady && existing.draft.projectId
+        ? (
+            await resolveProjectToolPlanningTasks(supabase, {
+              userId: user.sub,
+              projectId: existing.draft.projectId,
+              objective: existing.draft.objective,
+              tasks: result.tasks.map((task) => ({
+                title: task.title,
+                description: task.description,
+                executionStrategy: task.executionStrategy,
+                toolSummary: task.toolSummary || null,
+                requiredToolkitSlugs: task.requiredToolkitSlugs,
+              })),
+              discoverMissingToolkitRequirements: true,
+            })
+          ).map((task, index) => ({
+            ...result.tasks[index],
+            executionStrategy: task.executionStrategy,
+            toolSummary: task.toolSummary ?? result.tasks[index]?.toolSummary ?? "",
+            requiredToolkitSlugs: task.requiredToolkitSlugs,
+          }))
+        : result.tasks;
     const nextQuestions = isReviewReady && result.questions.length === 0
       ? updatedQuestions.map((question) => ({
           id: question.questionKey ?? question.id,
@@ -199,11 +226,27 @@ export async function POST(request: Request) {
         questionCount: nextQuestions.length,
         generatedMarkdown: result.draftMarkdown || null,
         draftMarkdown: result.draftMarkdown || existing.draft.draftMarkdown,
-        taskDrafts: result.tasks,
+        taskDrafts,
         eventNarrative: result.eventNarrative,
         lastGeneratedAt: isReviewReady ? new Date().toISOString() : existing.draft.lastGeneratedAt,
       },
     });
+    const toolPreflight =
+      isReviewReady && existing.draft.projectId
+        ? await buildProjectToolPreflight(supabase, {
+            userId: user.sub,
+            projectId: existing.draft.projectId,
+            objective: existing.draft.objective,
+            tasks: taskDrafts.map((task) => ({
+              title: task.title,
+              description: task.description,
+              executionStrategy: task.executionStrategy,
+              toolSummary: task.toolSummary || null,
+              requiredToolkitSlugs: task.requiredToolkitSlugs,
+            })),
+            nextPath: `/dashboard/drafts?draftId=${payload.draftId}`,
+          })
+        : null;
 
     await insertUsageRecords(supabase, user.sub, [
       {
@@ -224,6 +267,7 @@ export async function POST(request: Request) {
     const response: IntakeFlowResponse = {
       draft: savedDraft,
       questions: savedQuestions,
+      toolPreflight,
     };
 
     return NextResponse.json(response);
