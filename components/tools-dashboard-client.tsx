@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import type { MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BlocksIcon,
@@ -90,7 +91,9 @@ type SaveApiKeyResponse = {
 };
 
 async function fetchComposioToolCatalog() {
-  return fetchJson<ComposioToolCatalog>("/api/tools");
+  return fetchJson<ComposioToolCatalog>("/api/tools", {
+    cache: "no-store",
+  });
 }
 
 async function fetchToolkitTools(toolkitSlug: string) {
@@ -128,6 +131,30 @@ async function saveToolkitApiKey({
     },
     method: "POST",
   });
+}
+
+function mergeConnectionIntoCatalog(
+  catalog: ComposioToolCatalog | undefined,
+  connection: ProviderConnection,
+) {
+  if (!catalog) {
+    return catalog;
+  }
+
+  return {
+    ...catalog,
+    toolkits: catalog.toolkits.map((toolkit) =>
+      toolkit.slug === connection.toolkitSlug
+        ? {
+            ...toolkit,
+            connectionStatus: connection.status,
+            connectionAuthScheme: connection.authScheme,
+            apiKeyLastFour: connection.apiKeyLastFour,
+            apiKeyUpdatedAt: connection.apiKeyUpdatedAt,
+          }
+        : toolkit,
+    ),
+  };
 }
 
 function readStoredCatalogSnapshot() {
@@ -270,6 +297,15 @@ function getConnectionPresentation(toolkit: ComposioToolkitRecord) {
       badgeVariant: "secondary" as const,
       ctaLabel: null,
       label: "No auth required",
+      tone: "text-muted-foreground",
+    };
+  }
+
+  if (toolkit.supportsApiKey && toolkit.apiKeyUpdatedAt && toolkit.connectionStatus !== "active") {
+    return {
+      badgeVariant: "outline" as const,
+      ctaLabel: toolkit.supportsOAuth ? "Connect" : "Update API Key",
+      label: "API key saved",
       tone: "text-muted-foreground",
     };
   }
@@ -421,10 +457,24 @@ function ToolkitConnectionControls({
   onOAuth: () => void;
   layout?: "inline" | "footer";
 }) {
+  function handleApiKeyClick(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    onApiKey();
+  }
+
+  function handleOAuthClick(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    onOAuth();
+  }
+
   const connection = getConnectionPresentation(toolkit);
   const isConnected = toolkit.connectionStatus === "active" && !toolkit.noAuth;
   const canConnect = toolkit.supportsOAuth && !isConnected;
   const canSaveApiKey = toolkit.supportsApiKey && !isConnected;
+  const apiKeyLabel =
+    toolkit.apiKeyUpdatedAt || connection.ctaLabel === "Update API Key"
+      ? "Update API Key"
+      : "API Key";
   const statusCopy = toolkit.noAuth ? null : (
     <div className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
       {getStatusIcon(toolkit.connectionStatus, toolkit.noAuth)}
@@ -437,13 +487,13 @@ function ToolkitConnectionControls({
       <div className="flex flex-col items-stretch gap-2">
         {statusCopy}
         {canSaveApiKey ? (
-          <Button onClick={onApiKey} size="sm" type="button" variant="outline">
+          <Button onClick={handleApiKeyClick} size="sm" type="button" variant="outline">
             <KeyRoundIcon className="size-3.5" />
-            API Key
+            {apiKeyLabel}
           </Button>
         ) : null}
         {canConnect ? (
-          <Button onClick={onOAuth} size="sm" type="button">
+          <Button onClick={handleOAuthClick} size="sm" type="button">
             {connectMutation.isPending && connectMutation.variables === toolkit.slug ? (
               <>
                 <LoaderCircleIcon className="size-3.5 animate-spin" />
@@ -470,7 +520,7 @@ function ToolkitConnectionControls({
       {(canConnect || canSaveApiKey) ? (
         <div className="flex shrink-0 items-center gap-2">
           {canConnect ? (
-            <Button onClick={onOAuth} size="sm" type="button">
+            <Button onClick={handleOAuthClick} size="sm" type="button">
               {connectMutation.isPending && connectMutation.variables === toolkit.slug ? (
                 <>
                   <LoaderCircleIcon className="size-3.5 animate-spin" />
@@ -482,9 +532,9 @@ function ToolkitConnectionControls({
             </Button>
           ) : null}
           {canSaveApiKey ? (
-            <Button onClick={onApiKey} size="sm" type="button" variant="outline">
+            <Button onClick={handleApiKeyClick} size="sm" type="button" variant="outline">
               <KeyRoundIcon className="size-3.5" />
-              API Key
+              {apiKeyLabel}
             </Button>
           ) : null}
         </div>
@@ -632,7 +682,11 @@ export function ToolsDashboardClient({
 
   const apiKeyMutation = useMutation({
     mutationFn: saveToolkitApiKey,
-    onSuccess: async (_, variables) => {
+    onSuccess: async (result, variables) => {
+      queryClient.setQueryData<ComposioToolCatalog | undefined>(
+        dashboardQueryKeys.tools.catalog,
+        (current) => mergeConnectionIntoCatalog(current, result.connection),
+      );
       await queryClient.invalidateQueries({
         queryKey: dashboardQueryKeys.tools.catalog,
       });

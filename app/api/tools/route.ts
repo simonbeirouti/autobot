@@ -18,7 +18,7 @@ export async function GET() {
 
     return NextResponse.json(catalog, {
       headers: {
-        "Cache-Control": "private, max-age=1800, stale-while-revalidate=86400",
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (error) {

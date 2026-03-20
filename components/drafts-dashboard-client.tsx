@@ -13,12 +13,6 @@ import { MarkdownPreview } from "@/components/markdown-preview";
 import { useProject } from "@/components/providers/project-provider";
 import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import {
   WorkspaceSidebarPanel,
   WorkspaceSidebarSkeleton,
   WorkspaceSplitLayout,
@@ -51,7 +45,6 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -857,66 +850,62 @@ function DraftWorkspaceView({
                 </div>
               ) : null}
             </CardHeader>
-            <CardContent className="flex flex-1 flex-col space-y-4 xl:min-h-0">
+            <CardContent className="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
               {toolPreflight && toolPreflight.taskToolPlan.length > 0 ? (
-                <ScrollArea className="min-h-0 flex-1">
-                  <div className="space-y-4">
-                    <Accordion collapsible className="border" type="single">
-                      {toolPreflight.taskToolPlan.map((task, index) => {
-                        const taskConnectionMeta = getTaskConnectionMeta(task, readinessByToolkit);
+                <div className="space-y-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1">
+                  {toolPreflight.taskToolPlan.map((task, index) => {
+                    const taskConnectionMeta = getTaskConnectionMeta(task, readinessByToolkit);
 
-                        return (
-                          <AccordionItem
-                            key={`${task.title}-${index}`}
-                            value={`${task.title}-${index}`}
-                          >
-                            <AccordionTrigger className="px-4 py-4 text-left hover:no-underline">
-                              <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-                                <div className="min-w-0 space-y-1">
-                                  <p className="text-sm font-medium">{task.title}</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {task.requiredToolkitSlugs.length > 1
-                                      ? `Review the app options for this step.`
-                                      : task.requiredToolkitSlugs.length === 1
-                                        ? "Review the app needed for this step."
-                                        : "No additional app connection is required for this step."}
-                                  </p>
-                                </div>
-                                <Badge variant={taskConnectionMeta.badgeVariant}>
-                                  {taskConnectionMeta.label}
-                                </Badge>
-                              </div>
-                            </AccordionTrigger>
-                            <AccordionContent className="px-4 pb-4">
-                              <div className="space-y-2 text-sm">
-                                {task.toolSummary ? (
-                                  <p className="text-muted-foreground">{task.toolSummary}</p>
-                                ) : null}
-                                {task.requiredToolkitSlugs.length > 1 ? (
-                                  <p className="text-muted-foreground">
-                                    More than one app may work for this step. Connect the best fit for your workflow.
-                                  </p>
-                                ) : null}
-                                {task.requiredToolkitSlugs.length > 0 ? (
-                                  <ToolConnectionChecklist
-                                    nextPath={`/dashboard/drafts?draftId=${flow.draft.id}`}
-                                    readiness={toolPreflight.readiness}
-                                    requiredToolkitSlugs={task.requiredToolkitSlugs}
-                                  />
-                                ) : null}
-                              </div>
-                            </AccordionContent>
-                          </AccordionItem>
-                        );
-                      })}
-                    </Accordion>
+                    return (
+                      <div
+                        className="space-y-4 border p-4"
+                        key={`${task.title}-${index}`}
+                      >
+                        <div className="flex min-w-0 items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <p className="text-sm font-medium">{task.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {task.requiredToolkitSlugs.length > 1
+                                ? "Review the app options for this step."
+                                : task.requiredToolkitSlugs.length === 1
+                                  ? "Review the app needed for this step."
+                                  : "No additional app connection is required for this step."}
+                            </p>
+                          </div>
+                          <Badge className="shrink-0" variant={taskConnectionMeta.badgeVariant}>
+                            {taskConnectionMeta.label}
+                          </Badge>
+                        </div>
+
+                        <div className="space-y-2 text-sm">
+                          {task.toolSummary ? (
+                            <p className="text-muted-foreground">{task.toolSummary}</p>
+                          ) : null}
+                          {task.requiredToolkitSlugs.length > 1 ? (
+                            <p className="text-muted-foreground">
+                              More than one app may work for this step. Connect the best fit for your workflow.
+                            </p>
+                          ) : null}
+                          {task.requiredToolkitSlugs.length > 0 ? (
+                            <ToolConnectionChecklist
+                              nextPath={`/dashboard/drafts?draftId=${flow.draft.id}`}
+                              readiness={toolPreflight.readiness}
+                              requiredToolkitSlugs={task.requiredToolkitSlugs}
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="space-y-4">
                     {!launchBlocked ? (
                       <div className="border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-muted-foreground">
                         No missing app connections. You can continue to the draft markdown.
                       </div>
                     ) : null}
                   </div>
-                </ScrollArea>
+                </div>
               ) : (
                 <div className="rounded-lg border p-4 text-sm text-muted-foreground">
                   No apps are required for this objective. You can continue to the draft markdown.
