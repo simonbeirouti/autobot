@@ -383,6 +383,37 @@ export async function fetchProjectAssets(
   return (data ?? []).map((row) => mapAsset(row as AssetRow));
 }
 
+export async function createProjectAsset(
+  supabase: SupabaseClient,
+  params: {
+    projectId: string;
+    userId: string;
+    label: string;
+    assetType: string;
+    storagePath?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("project_assets")
+    .insert({
+      project_id: params.projectId,
+      user_id: params.userId,
+      label: params.label,
+      asset_type: params.assetType,
+      storage_path: params.storagePath ?? null,
+      metadata: params.metadata ?? {},
+    })
+    .select("id, project_id, user_id, label, asset_type, storage_path, metadata, created_at, updated_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapAsset(data as AssetRow);
+}
+
 export async function createProjectChatThread(
   supabase: SupabaseClient,
   params: {

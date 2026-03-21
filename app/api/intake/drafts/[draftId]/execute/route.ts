@@ -38,7 +38,9 @@ type RunTaskRecord = {
   position: number;
   agentId: string | null;
   agentLabel: string | null;
+  toolRequirement: "none" | "optional" | "required";
   requiredToolkitSlugs: string[];
+  optionalToolkitSlugs: string[];
   requiredToolIds: string[];
   executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
   toolSummary: string | null;
@@ -129,9 +131,11 @@ export async function POST(
       objective: draft.objective,
       tasks: previewPayload.tasks.map((task) => ({
         title: task.title,
+        toolRequirement: task.toolRequirement,
         executionStrategy: task.executionStrategy,
         toolSummary: task.toolSummary,
         requiredToolkitSlugs: task.requiredToolkitSlugs,
+        optionalToolkitSlugs: task.optionalToolkitSlugs,
       })),
       nextPath: `/dashboard/drafts?draftId=${draft.id}`,
       discoverMissingToolkitRequirements: true,
@@ -210,14 +214,13 @@ export async function POST(
     let actionRequired: RunActionRequired | null = null;
     let taskRecords: RunTaskRecord[] = initialPayload.tasks;
 
-    if (toolRuntime.missingPrerequisites.length > 0) {
+    if (toolPreflight.blockingToolkitSlugs.length > 0) {
+      const blockingReadiness = toolPreflight.readiness.filter((item) =>
+        toolPreflight.blockingToolkitSlugs.includes(item.toolkitSlug),
+      );
       actionRequired = buildToolAuthActionRequired({
         runId: run.id,
-        readiness: toolRuntime.missingPrerequisites.map((item) => ({
-          toolkitSlug: item.toolkitSlug,
-          status: item.reason,
-          message: item.message,
-        })),
+        readiness: blockingReadiness,
         preflight: {
           ...toolPreflight,
           recommendedAction:
@@ -237,7 +240,12 @@ export async function POST(
         actionHref: `/dashboard/runs?runId=${run.id}&connectTools=1`,
       });
 
-      const setupTasks = buildMissingToolkitChecklist(toolRuntime).map((item) => ({
+      const setupTasks = buildMissingToolkitChecklist({
+        ...toolRuntime,
+        missingPrerequisites: toolRuntime.missingPrerequisites.filter((item) =>
+          toolPreflight.blockingToolkitSlugs.includes(item.toolkitSlug),
+        ),
+      }).map((item) => ({
         id: randomUUID(),
         runId: run.id,
         title: item.title,
@@ -246,7 +254,9 @@ export async function POST(
         position: 0,
         agentId: "operator" as const,
         agentLabel: "Operator" as const,
+        toolRequirement: "required" as const,
         requiredToolkitSlugs: [item.toolkitSlug],
+        optionalToolkitSlugs: [] as string[],
         requiredToolIds: [] as string[],
         executionStrategy: "manual_setup" as const,
         toolSummary: item.description,

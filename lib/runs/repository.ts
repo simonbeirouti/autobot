@@ -166,7 +166,9 @@ export async function insertRunTasks(
     position: number;
     agentId: string | null;
     agentLabel: string | null;
+    toolRequirement: "none" | "optional" | "required";
     requiredToolkitSlugs: string[];
+    optionalToolkitSlugs: string[];
     requiredToolIds: string[];
     executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
     toolSummary: string | null;
@@ -186,7 +188,9 @@ export async function insertRunTasks(
         position: task.position,
         agent_id: task.agentId,
         agent_label: task.agentLabel,
+        tool_requirement: task.toolRequirement,
         required_toolkit_slugs: task.requiredToolkitSlugs,
+        optional_toolkit_slugs: task.optionalToolkitSlugs,
         required_tool_ids: task.requiredToolIds,
         execution_strategy: task.executionStrategy,
         tool_summary: task.toolSummary,
@@ -305,7 +309,7 @@ export async function fetchWorkspace(
     await Promise.all([
       supabase
         .from("run_tasks")
-        .select("id, run_id, title, description, status, position, agent_id, agent_label, required_toolkit_slugs, required_tool_ids, execution_strategy, tool_summary, action_required, created_at, updated_at")
+        .select("id, run_id, title, description, status, position, agent_id, agent_label, tool_requirement, required_toolkit_slugs, optional_toolkit_slugs, required_tool_ids, execution_strategy, tool_summary, action_required, created_at, updated_at")
         .eq("run_id", params.runId)
         .order("position", { ascending: true }),
       supabase
@@ -398,7 +402,9 @@ export async function updateTaskStatuses(
         status: task.status,
         agent_id: task.agentId,
         agent_label: task.agentLabel,
+        tool_requirement: task.toolRequirement,
         required_toolkit_slugs: task.requiredToolkitSlugs,
+        optional_toolkit_slugs: task.optionalToolkitSlugs,
         required_tool_ids: task.requiredToolIds,
         execution_strategy: task.executionStrategy,
         tool_summary: task.toolSummary,
@@ -443,7 +449,9 @@ export async function syncRunTasks(
       position: task.position,
       agent_id: task.agentId,
       agent_label: task.agentLabel,
+      tool_requirement: task.toolRequirement,
       required_toolkit_slugs: task.requiredToolkitSlugs,
+      optional_toolkit_slugs: task.optionalToolkitSlugs,
       required_tool_ids: task.requiredToolIds,
       execution_strategy: task.executionStrategy,
       tool_summary: task.toolSummary,
@@ -553,7 +561,9 @@ function mapTask(row: {
   position: number;
   agent_id: string | null;
   agent_label: string | null;
+  tool_requirement: "none" | "optional" | "required";
   required_toolkit_slugs: string[] | null;
+  optional_toolkit_slugs: string[] | null;
   required_tool_ids: string[] | null;
   execution_strategy: "manual_setup" | "tool_execution" | "analysis_only";
   tool_summary: string | null;
@@ -570,7 +580,9 @@ function mapTask(row: {
     position: row.position,
     agentId: row.agent_id,
     agentLabel: row.agent_label,
+    toolRequirement: row.tool_requirement ?? "none",
     requiredToolkitSlugs: row.required_toolkit_slugs ?? [],
+    optionalToolkitSlugs: row.optional_toolkit_slugs ?? [],
     requiredToolIds: row.required_tool_ids ?? [],
     executionStrategy: row.execution_strategy,
     toolSummary: row.tool_summary,

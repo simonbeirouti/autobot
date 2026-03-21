@@ -82,8 +82,13 @@ function reindexTasks(tasks: RunTask[]) {
 
 function getTaskRequiredToolkitSlugs(
   task: RunTask,
-  fallbackToolRuntime: ResolvedProjectToolRuntime | null,
-  taskPlan?: { title: string; requiredToolkitSlugs: string[] }[] | null,
+  _fallbackToolRuntime: ResolvedProjectToolRuntime | null,
+  taskPlan?: {
+    title: string;
+    toolRequirement: "none" | "optional" | "required";
+    requiredToolkitSlugs: string[];
+    optionalToolkitSlugs: string[];
+  }[] | null,
 ) {
   if (task.requiredToolkitSlugs.length > 0) {
     return task.requiredToolkitSlugs;
@@ -92,6 +97,35 @@ function getTaskRequiredToolkitSlugs(
   const plannedMatch = taskPlan?.find((item) => item.title === task.title);
   if (plannedMatch && plannedMatch.requiredToolkitSlugs.length > 0) {
     return plannedMatch.requiredToolkitSlugs;
+  }
+
+  return [];
+}
+
+function getTaskPreferredToolkitSlugs(
+  task: RunTask,
+  fallbackToolRuntime: ResolvedProjectToolRuntime | null,
+  taskPlan?: {
+    title: string;
+    toolRequirement: "none" | "optional" | "required";
+    requiredToolkitSlugs: string[];
+    optionalToolkitSlugs: string[];
+  }[] | null,
+) {
+  if (task.requiredToolkitSlugs.length > 0) {
+    return task.requiredToolkitSlugs;
+  }
+
+  if (task.optionalToolkitSlugs.length > 0) {
+    return task.optionalToolkitSlugs;
+  }
+
+  const plannedMatch = taskPlan?.find((item) => item.title === task.title);
+  if (plannedMatch?.requiredToolkitSlugs.length) {
+    return plannedMatch.requiredToolkitSlugs;
+  }
+  if (plannedMatch?.optionalToolkitSlugs.length) {
+    return plannedMatch.optionalToolkitSlugs;
   }
 
   return fallbackToolRuntime?.activeToolkitSlugs ?? [];
@@ -111,7 +145,9 @@ function createSetupTasks(params: {
     position: 0,
     agentId: "operator",
     agentLabel: "Operator",
+    toolRequirement: "required" as const,
     requiredToolkitSlugs: [item.toolkitSlug],
+    optionalToolkitSlugs: [],
     requiredToolIds: [],
     executionStrategy: "manual_setup" as const,
     toolSummary: item.description,
@@ -355,16 +391,21 @@ export async function advanceRunWorkspace(params: {
       toolRuntime,
       currentWorkspace.toolPreflight?.taskToolPlan ?? null,
     );
+    const preferredToolkitSlugs = getTaskPreferredToolkitSlugs(
+      startedTask,
+      toolRuntime,
+      currentWorkspace.toolPreflight?.taskToolPlan ?? null,
+    );
     const relevantMissingPrerequisites =
       requiredToolkitSlugs.length > 0
         ? toolRuntime.missingPrerequisites.filter((item) =>
             requiredToolkitSlugs.includes(item.toolkitSlug),
           )
-        : toolRuntime.missingPrerequisites;
+        : [];
     const taskRuntimeCandidates =
-      requiredToolkitSlugs.length > 0
+      preferredToolkitSlugs.length > 0
         ? toolRuntime.toolCandidates.filter((candidate) =>
-            requiredToolkitSlugs.includes(candidate.toolkitSlug),
+            preferredToolkitSlugs.includes(candidate.toolkitSlug),
           )
         : toolRuntime.toolCandidates;
     const effectiveExecutionStrategy =
@@ -372,6 +413,10 @@ export async function advanceRunWorkspace(params: {
         ? taskRuntimeCandidates.length > 0 || requiredToolkitSlugs.length > 0
           ? ("tool_execution" as const)
           : ("analysis_only" as const)
+        : startedTask.executionStrategy === "tool_execution" &&
+            startedTask.toolRequirement === "optional" &&
+            taskRuntimeCandidates.length === 0
+          ? ("analysis_only" as const)
         : startedTask.executionStrategy;
 
     const shouldBlockForToolReadiness =
@@ -388,6 +433,7 @@ export async function advanceRunWorkspace(params: {
         runId: currentWorkspace.run.id,
         taskTitle: startedTask.title,
         requiredToolkitSlugs,
+        preferredToolkitSlugs,
         relevantMissingPrerequisites,
       });
       const readiness = relevantMissingPrerequisites.map((item) => ({
@@ -398,9 +444,11 @@ export async function advanceRunWorkspace(params: {
       const blockedPreflight = buildToolPreflightFromReadiness({
         tasks: result.tasks.map((task) => ({
           title: task.title,
+          toolRequirement: task.toolRequirement,
           executionStrategy: task.executionStrategy,
           toolSummary: task.toolSummary,
           requiredToolkitSlugs: task.requiredToolkitSlugs,
+          optionalToolkitSlugs: task.optionalToolkitSlugs,
         })),
         readiness: currentWorkspace.toolPreflight?.readiness ?? readiness,
         nextPath: `/dashboard/runs?runId=${currentWorkspace.run.id}`,
@@ -468,7 +516,7 @@ export async function advanceRunWorkspace(params: {
         runId: currentWorkspace.run.id,
         taskTitle: startedTask.title,
         candidateCount: taskRuntimeCandidates.length,
-        requiredToolkitSlugs,
+        preferredToolkitSlugs,
       });
       const project = await fetchProject(params.supabase, {
         projectId: currentWorkspace.run.projectId,
@@ -493,7 +541,7 @@ export async function advanceRunWorkspace(params: {
           objectiveId: currentWorkspace.run.objectiveId,
           threadId: null,
           runId: currentWorkspace.run.id,
-          allowedToolkitSlugs: requiredToolkitSlugs,
+          allowedToolkitSlugs: preferredToolkitSlugs,
           confirmedWriteActions: false,
         },
         systemPrompt: [
@@ -502,8 +550,8 @@ export async function advanceRunWorkspace(params: {
           `Project: ${project.name}.`,
           objective ? `Objective: ${objective.title}.` : "",
           startedTask.toolSummary ?? "",
-          requiredToolkitSlugs.length > 0
-            ? `Prefer these toolkits: ${requiredToolkitSlugs.join(", ")}.`
+          preferredToolkitSlugs.length > 0
+            ? `Prefer these toolkits: ${preferredToolkitSlugs.join(", ")}.`
             : "Use connected tools when they materially help complete this task.",
           "If the available tools are insufficient, explain what remains blocked.",
           "Return a concise execution summary.",

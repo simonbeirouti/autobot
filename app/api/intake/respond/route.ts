@@ -21,6 +21,8 @@ import {
   buildProjectToolPreflight,
   resolveProjectToolPlanningTasks,
 } from "@/lib/tools/preflight";
+import { resolveProjectTools } from "@/lib/tools/resolver";
+import { resolveProjectToolRuntime } from "@/lib/tools/runtime";
 
 const bodySchema = z.object({
   draftId: z.string().uuid(),
@@ -151,6 +153,30 @@ export async function POST(request: Request) {
       sessionId: existing.draft.sessionId,
       userId: user.sub,
     });
+    const [projectTools, toolRuntime] =
+      existing.draft.projectId
+        ? await Promise.all([
+            resolveProjectTools(supabase, {
+              userId: user.sub,
+              projectId: existing.draft.projectId,
+            }),
+            resolveProjectToolRuntime(supabase, {
+              userId: user.sub,
+              projectId: existing.draft.projectId,
+              query: existing.draft.objective,
+            }),
+          ])
+        : [
+            {
+              selectedToolkitSlugs: [] as string[],
+              activeToolkitSlugs: [] as string[],
+              inactiveToolkitSlugs: [] as string[],
+              markdown: "Project tool context:\nSelected toolkits: none\nConnected and ready: none",
+            },
+            {
+              toolCandidates: [] as Array<{ title: string; toolkitSlug: string }>,
+            },
+          ];
 
     const result = await clarifyObjective({
       objective: existing.draft.objective,
@@ -161,6 +187,20 @@ export async function POST(request: Request) {
       clarificationRounds: transcript.filter(
         (message) => message.role === "assistant" && message.questions.length > 0,
       ).length,
+      planningContext: {
+        markdown: [
+          projectTools.markdown,
+          toolRuntime.toolCandidates.length > 0
+            ? `Likely helpful tools: ${toolRuntime.toolCandidates
+                .slice(0, 8)
+                .map((candidate) => `${candidate.title} [${candidate.toolkitSlug}]`)
+                .join(", ")}`
+            : "Likely helpful tools: none identified yet.",
+        ].join("\n"),
+        selectedToolkitSlugs: projectTools.selectedToolkitSlugs,
+        activeToolkitSlugs: projectTools.activeToolkitSlugs,
+        inactiveToolkitSlugs: projectTools.inactiveToolkitSlugs,
+      },
     });
 
     await appendClarificationMessage(supabase, {
@@ -182,17 +222,21 @@ export async function POST(request: Request) {
               tasks: result.tasks.map((task) => ({
                 title: task.title,
                 description: task.description,
+                toolRequirement: task.toolRequirement,
                 executionStrategy: task.executionStrategy,
                 toolSummary: task.toolSummary || null,
                 requiredToolkitSlugs: task.requiredToolkitSlugs,
+                optionalToolkitSlugs: task.optionalToolkitSlugs,
               })),
               discoverMissingToolkitRequirements: true,
             })
           ).map((task, index) => ({
             ...result.tasks[index],
+            toolRequirement: task.toolRequirement,
             executionStrategy: task.executionStrategy,
             toolSummary: task.toolSummary ?? result.tasks[index]?.toolSummary ?? "",
             requiredToolkitSlugs: task.requiredToolkitSlugs,
+            optionalToolkitSlugs: task.optionalToolkitSlugs,
           }))
         : result.tasks;
     const nextQuestions = isReviewReady && result.questions.length === 0
@@ -240,9 +284,11 @@ export async function POST(request: Request) {
             tasks: taskDrafts.map((task) => ({
               title: task.title,
               description: task.description,
+              toolRequirement: task.toolRequirement,
               executionStrategy: task.executionStrategy,
               toolSummary: task.toolSummary || null,
               requiredToolkitSlugs: task.requiredToolkitSlugs,
+              optionalToolkitSlugs: task.optionalToolkitSlugs,
             })),
             nextPath: `/dashboard/drafts?draftId=${payload.draftId}`,
           })

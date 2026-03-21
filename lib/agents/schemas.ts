@@ -15,7 +15,12 @@ export const clarificationTaskSchema = z.object({
   description: z.string().max(300).optional().default(""),
   agentId: z.enum(agentIds).optional().default("orchestrator"),
   requiredToolkitSlugs: z.array(z.string().min(1).max(80)).max(8).optional().default([]),
+  optionalToolkitSlugs: z.array(z.string().min(1).max(80)).max(8).optional().default([]),
   requiredToolIds: z.array(z.string().min(1).max(120)).max(8).optional().default([]),
+  toolRequirement: z
+    .enum(["none", "optional", "required"])
+    .optional()
+    .default("none"),
   executionStrategy: z
     .enum(["manual_setup", "tool_execution", "analysis_only"])
     .optional()

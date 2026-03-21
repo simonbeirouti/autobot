@@ -1,7 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  getFallbackInternalToolDefinitions,
+  getInternalDefinitionBySlug,
+} from "@/lib/tools/internal-registry";
 import type {
+  InternalToolDefinition,
   ProjectToolkitSelection,
+  ProjectInternalToolEnablement,
   ProviderConnection,
   ToolInvocationStatus,
   ToolkitConnectionStatus,
@@ -41,6 +47,38 @@ type ProjectToolkitSelectionRow = {
   created_at: string;
 };
 
+type InternalToolDefinitionRow = {
+  id: string;
+  slug: string;
+  toolkit_slug: string;
+  source: "internal_builtin" | "internal_custom";
+  title: string;
+  description: string;
+  execution_mode: "read" | "write" | "admin";
+  risk_level: "low" | "medium" | "high";
+  executor_key: string;
+  input_schema: Record<string, unknown> | null;
+  output_schema: Record<string, unknown> | null;
+  tags: string[] | null;
+  capabilities: string[] | null;
+  approval_policy: "none" | "confirm_writes";
+  requires_connection: boolean;
+  enabled_by_default: boolean;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ProjectInternalToolEnablementRow = {
+  id: string;
+  project_id: string;
+  user_id: string;
+  tool_slug: string;
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 function mapOnboarding(row: UserToolOnboardingRow): UserToolOnboarding {
   return {
     userId: row.user_id,
@@ -77,6 +115,44 @@ function mapProjectToolkitSelection(row: ProjectToolkitSelectionRow): ProjectToo
     userId: row.user_id,
     toolkitSlug: row.toolkit_slug,
     createdAt: row.created_at,
+  };
+}
+
+function mapInternalToolDefinition(row: InternalToolDefinitionRow): InternalToolDefinition {
+  return {
+    id: row.id,
+    slug: row.slug,
+    toolkitSlug: row.toolkit_slug,
+    source: row.source,
+    title: row.title,
+    description: row.description,
+    executionMode: row.execution_mode,
+    riskLevel: row.risk_level,
+    executorKey: row.executor_key,
+    inputSchema: row.input_schema,
+    outputSchema: row.output_schema,
+    tags: row.tags ?? [],
+    capabilities: row.capabilities ?? [],
+    approvalPolicy: row.approval_policy,
+    requiresConnection: row.requires_connection,
+    enabledByDefault: row.enabled_by_default,
+    metadata: row.metadata ?? {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapProjectInternalToolEnablement(
+  row: ProjectInternalToolEnablementRow,
+): ProjectInternalToolEnablement {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    userId: row.user_id,
+    toolSlug: row.tool_slug,
+    isEnabled: row.is_enabled,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -270,6 +346,147 @@ export async function replaceProjectToolkitSelections(
   }
 
   return (data ?? []).map((row) => mapProjectToolkitSelection(row as ProjectToolkitSelectionRow));
+}
+
+export async function fetchInternalToolDefinitions(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("internal_tool_definitions")
+    .select(
+      "id, slug, toolkit_slug, source, title, description, execution_mode, risk_level, executor_key, input_schema, output_schema, tags, capabilities, approval_policy, requires_connection, enabled_by_default, metadata, created_at, updated_at",
+    )
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map((row) => mapInternalToolDefinition(row as InternalToolDefinitionRow));
+}
+
+export async function fetchInternalToolDefinitionsWithFallback(supabase: SupabaseClient) {
+  try {
+    const definitions = await fetchInternalToolDefinitions(supabase);
+    return definitions.length > 0 ? definitions : getFallbackInternalToolDefinitions();
+  } catch {
+    return getFallbackInternalToolDefinitions();
+  }
+}
+
+export async function fetchInternalToolDefinitionBySlug(
+  supabase: SupabaseClient,
+  params: { toolSlug: string },
+) {
+  const definitions = await fetchInternalToolDefinitionsWithFallback(supabase);
+  return (
+    definitions.find((definition) => definition.slug === params.toolSlug) ??
+    getInternalDefinitionBySlug(params.toolSlug)
+  );
+}
+
+export async function upsertInternalToolDefinition(
+  supabase: SupabaseClient,
+  params: {
+    slug: string;
+    toolkitSlug: string;
+    source: "internal_builtin" | "internal_custom";
+    title: string;
+    description: string;
+    executionMode: "read" | "write" | "admin";
+    riskLevel: "low" | "medium" | "high";
+    executorKey: string;
+    inputSchema?: Record<string, unknown> | null;
+    outputSchema?: Record<string, unknown> | null;
+    tags?: string[];
+    capabilities?: string[];
+    approvalPolicy?: "none" | "confirm_writes";
+    requiresConnection?: boolean;
+    enabledByDefault?: boolean;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("internal_tool_definitions")
+    .upsert(
+      {
+        slug: params.slug,
+        toolkit_slug: params.toolkitSlug,
+        source: params.source,
+        title: params.title,
+        description: params.description,
+        execution_mode: params.executionMode,
+        risk_level: params.riskLevel,
+        executor_key: params.executorKey,
+        input_schema: params.inputSchema ?? null,
+        output_schema: params.outputSchema ?? null,
+        tags: params.tags ?? [],
+        capabilities: params.capabilities ?? [],
+        approval_policy: params.approvalPolicy ?? "none",
+        requires_connection: params.requiresConnection ?? false,
+        enabled_by_default: params.enabledByDefault ?? true,
+        metadata: params.metadata ?? {},
+      },
+      { onConflict: "slug" },
+    )
+    .select(
+      "id, slug, toolkit_slug, source, title, description, execution_mode, risk_level, executor_key, input_schema, output_schema, tags, capabilities, approval_policy, requires_connection, enabled_by_default, metadata, created_at, updated_at",
+    )
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapInternalToolDefinition(data as InternalToolDefinitionRow);
+}
+
+export async function fetchProjectInternalToolEnablements(
+  supabase: SupabaseClient,
+  params: { projectId: string; userId: string },
+) {
+  const { data, error } = await supabase
+    .from("project_internal_tool_enablements")
+    .select("id, project_id, user_id, tool_slug, is_enabled, created_at, updated_at")
+    .eq("project_id", params.projectId)
+    .eq("user_id", params.userId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map((row) =>
+    mapProjectInternalToolEnablement(row as ProjectInternalToolEnablementRow),
+  );
+}
+
+export async function upsertProjectInternalToolEnablement(
+  supabase: SupabaseClient,
+  params: {
+    projectId: string;
+    userId: string;
+    toolSlug: string;
+    isEnabled: boolean;
+  },
+) {
+  const { data, error } = await supabase
+    .from("project_internal_tool_enablements")
+    .upsert(
+      {
+        project_id: params.projectId,
+        user_id: params.userId,
+        tool_slug: params.toolSlug,
+        is_enabled: params.isEnabled,
+      },
+      { onConflict: "project_id,tool_slug" },
+    )
+    .select("id, project_id, user_id, tool_slug, is_enabled, created_at, updated_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapProjectInternalToolEnablement(data as ProjectInternalToolEnablementRow);
 }
 
 export async function insertToolInvocation(

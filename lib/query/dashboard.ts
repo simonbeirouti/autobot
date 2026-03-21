@@ -27,6 +27,10 @@ export const dashboardQueryKeys = {
   tools: {
     catalog: ["tools", "catalog"] as const,
     toolkit: (toolkitSlug: string) => ["tools", "toolkit", toolkitSlug] as const,
+    internalCatalog: (projectId?: string | null) =>
+      ["tools", "internal-catalog", projectId ?? "none"] as const,
+    internalTool: (toolSlug: string, projectId?: string | null) =>
+      ["tools", "internal-tool", toolSlug, projectId ?? "none"] as const,
     onboarding: ["tools", "onboarding"] as const,
   },
 };

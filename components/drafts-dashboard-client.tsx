@@ -178,12 +178,6 @@ function haveAnswersChanged(
   );
 }
 
-function buildDraftHref(pathname: string, draftId: string) {
-  const params = new URLSearchParams();
-  params.set("draftId", draftId);
-  return `${pathname}?${params.toString()}`;
-}
-
 function buildDraftSearchHref(
   pathname: string,
   searchParams: Pick<URLSearchParams, "toString">,

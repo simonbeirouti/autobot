@@ -32,9 +32,11 @@ export async function GET(
       objective: draft.objective,
       tasks: draft.taskDrafts.map((task) => ({
         title: task.title,
+        toolRequirement: task.toolRequirement,
         executionStrategy: task.executionStrategy,
         toolSummary: task.toolSummary || null,
         requiredToolkitSlugs: task.requiredToolkitSlugs,
+        optionalToolkitSlugs: task.optionalToolkitSlugs,
       })),
       nextPath: `/dashboard/drafts?draftId=${draft.id}`,
     });

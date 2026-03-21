@@ -12,8 +12,20 @@ import { z } from "zod";
 import { getConfiguredChatModel } from "@/lib/agents/model";
 import { getComposioToolsForToolkit } from "@/lib/tools/catalog";
 import { getComposioSession } from "@/lib/tools/composio";
-import { insertToolInvocation } from "@/lib/tools/repository";
+import { executeInternalTool, isWebSearchConfigured } from "@/lib/tools/internal-executors";
+import {
+  getInternalToolScope,
+  isInternalDefinitionEnabled,
+  isInternalDefinitionVisible,
+  toResolvedInternalToolCandidate,
+} from "@/lib/tools/internal-registry";
+import {
+  fetchInternalToolDefinitionsWithFallback,
+  fetchProjectInternalToolEnablements,
+  insertToolInvocation,
+} from "@/lib/tools/repository";
 import type {
+  InternalToolDefinition,
   ProviderConnection,
   ResolvedProjectToolRuntime,
   ResolvedToolCandidate,
@@ -157,7 +169,11 @@ async function searchToolkitTools(params: {
         id: `${params.connection.toolkitSlug}:${toolSlug}`,
         toolSlug,
         toolkitSlug: params.connection.toolkitSlug,
+        source: "composio_session",
+        executorKey: "composio_session",
+        config: {},
         sessionId: params.connection.composioSessionId,
+        requiresConnection: true,
         title: formatToolTitle(toolSlug),
         description: schemaRecord?.description ?? `Execute ${toolSlug} via ${params.connection.toolkitSlug}.`,
         inputSchema: schemaRecord?.inputSchema ?? null,
@@ -167,6 +183,9 @@ async function searchToolkitTools(params: {
         supportsChat: true,
         supportsRunTasks: true,
         executionGuidance: result.executionGuidance ?? null,
+        capabilities: [params.connection.toolkitSlug],
+        tags: ["composio"],
+        approvalPolicy: "confirm_writes",
       });
     }
   }
@@ -192,7 +211,12 @@ function buildReadinessMessage(toolkitSlug: string, status: ToolkitReadinessStat
 
 function resolveToolkitReadinessStatus(
   connection: ProviderConnection | undefined,
+  options?: { internalReady?: boolean | undefined },
 ): ToolkitReadinessStatus {
+  if (options?.internalReady) {
+    return "ready";
+  }
+
   if (!connection) {
     return "not_connected";
   }
@@ -213,7 +237,7 @@ function resolveToolkitReadinessStatus(
 }
 
 const toolkitDiscoverySchema = z.object({
-  requiresTools: z.boolean().default(false),
+  toolRequirement: z.enum(["none", "optional", "required"]).default("none"),
   toolkitSlugs: z.array(z.string().min(1)).max(4).default([]),
   rationale: z.string().max(280).default(""),
 });
@@ -244,7 +268,7 @@ export async function discoverTaskToolkitNeeds(params: {
 }) {
   if (params.candidateToolkitSlugs.length === 0) {
     return {
-      requiresTools: false,
+      toolRequirement: "none" as const,
       toolkitSlugs: [],
       rationale: "",
     };
@@ -253,7 +277,7 @@ export async function discoverTaskToolkitNeeds(params: {
   const model = getConfiguredChatModel();
   if (!model) {
     return {
-      requiresTools: false,
+      toolRequirement: "none" as const,
       toolkitSlugs: [],
       rationale: "",
     };
@@ -271,7 +295,9 @@ export async function discoverTaskToolkitNeeds(params: {
     new SystemMessage([
       "Decide whether the task requires external tools and, if so, which provided Composio toolkit slugs are the best fit.",
       "Only choose from the provided toolkit slugs.",
-      "Return requiresTools=false when the task can be completed without external tools.",
+      "Return toolRequirement=required only when the task cannot be completed usefully without tools.",
+      "Return toolRequirement=optional when tools would materially help but the task can still proceed without them.",
+      "Return toolRequirement=none when no tools are needed.",
       "Prefer the minimum set of toolkits needed for execution.",
     ].join("\n")),
     new HumanMessage([
@@ -286,7 +312,7 @@ export async function discoverTaskToolkitNeeds(params: {
   ]);
 
   return {
-    requiresTools: result.requiresTools,
+    toolRequirement: result.toolRequirement,
     toolkitSlugs: result.toolkitSlugs
       .map((value) => value.trim().toLowerCase())
       .filter((value) => params.candidateToolkitSlugs.includes(value)),
@@ -345,8 +371,10 @@ export async function discoverRelevantToolkitCandidates(params: {
 export function resolveToolkitReadiness(params: {
   selectedToolkitSlugs: string[];
   providerConnections: ProviderConnection[];
+  internalToolkitSlugs?: string[];
 }) {
   const latestByToolkit = new Map<string, ProviderConnection>();
+  const internalToolkitSlugs = new Set(params.internalToolkitSlugs ?? []);
 
   for (const connection of params.providerConnections) {
     if (!latestByToolkit.has(connection.toolkitSlug)) {
@@ -356,7 +384,9 @@ export function resolveToolkitReadiness(params: {
 
   const readiness = params.selectedToolkitSlugs.map<ToolkitReadinessItem>((toolkitSlug) => {
     const connection = latestByToolkit.get(toolkitSlug);
-    const status = resolveToolkitReadinessStatus(connection);
+    const status = resolveToolkitReadinessStatus(connection, {
+      internalReady: internalToolkitSlugs.has(toolkitSlug),
+    });
 
     return {
       toolkitSlug,
@@ -366,6 +396,127 @@ export function resolveToolkitReadiness(params: {
   });
 
   return readiness;
+}
+
+function scoreQueryMatch(query: string, tags: string[], capabilities: string[]) {
+  const haystack = `${tags.join(" ")} ${capabilities.join(" ")}`.toLowerCase();
+  const terms = query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+
+  return terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0);
+}
+
+function shouldIncludeInternalTool(params: {
+  definition: InternalToolDefinition;
+  query: string;
+}) {
+  if (params.definition.source === "internal_custom") {
+    const haystack = [
+      params.definition.title,
+      params.definition.slug,
+      params.definition.description,
+      params.definition.executorKey,
+      ...params.definition.tags,
+      ...params.definition.capabilities,
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return params.query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term.length >= 2)
+      .some((term) => haystack.includes(term));
+  }
+
+  if (params.definition.slug === "web_search" && !isWebSearchConfigured()) {
+    return false;
+  }
+
+  if (params.definition.slug === "page_extractor") {
+    return /https?:\/\//i.test(params.query) || scoreQueryMatch(params.query, params.definition.tags, params.definition.capabilities) > 0;
+  }
+
+  if (params.definition.slug === "artifact_store") {
+    return true;
+  }
+
+  if (params.definition.slug === "site_crawler") {
+    return /crawl|site|pages|inventory|domain|seo/i.test(params.query);
+  }
+
+  if (params.definition.slug === "document_search") {
+    return /document|asset|brief|notes|memory|file|pdf|csv|content/i.test(params.query);
+  }
+
+  return scoreQueryMatch(params.query, params.definition.tags, params.definition.capabilities) > 0;
+}
+
+function resolveInternalToolCandidates(params: {
+  definitions: InternalToolDefinition[];
+  enablementBySlug: Map<string, boolean>;
+  companyKey: string;
+  projectId: string;
+  query: string;
+}) {
+  return params.definitions
+    .filter((definition) =>
+      isInternalDefinitionVisible({
+        definition,
+        companyKey: params.companyKey,
+        projectId: params.projectId,
+      }),
+    )
+    .filter((definition) =>
+      isInternalDefinitionEnabled({
+        definition,
+        enablement: params.enablementBySlug.get(definition.slug),
+      }),
+    )
+    .filter((definition) => shouldIncludeInternalTool({
+      definition,
+      query: params.query,
+    }))
+    .map((definition) => ({
+      ...toResolvedInternalToolCandidate(definition),
+      executionGuidance:
+        definition.source === "internal_custom"
+          ? `Scope: ${
+              getInternalToolScope(definition).projectIds.length > 0 ? "project-scoped" : "company-scoped"
+            }.`
+          : null,
+    }));
+}
+
+function extractArtifactIds(value: unknown) {
+  const ids = new Set<string>();
+
+  const visit = (current: unknown) => {
+    if (!current || typeof current !== "object") {
+      return;
+    }
+
+    if (Array.isArray(current)) {
+      current.forEach(visit);
+      return;
+    }
+
+    const record = current as Record<string, unknown>;
+    if (typeof record.id === "string" && typeof record.assetType === "string") {
+      ids.add(record.id);
+    }
+    if (typeof record.assetId === "string") {
+      ids.add(record.assetId);
+    }
+
+    Object.values(record).forEach(visit);
+  };
+
+  visit(value);
+  return Array.from(ids);
 }
 
 export async function resolveProjectToolRuntime(
@@ -378,17 +529,48 @@ export async function resolveProjectToolRuntime(
 ): Promise<ResolvedProjectToolRuntime> {
   const { resolveProjectTools } = await import("@/lib/tools/resolver");
   const { fetchProviderConnections } = await import("@/lib/tools/repository");
+  const { fetchProject } = await import("@/lib/projects/repository");
 
-  const base = await resolveProjectTools(supabase, {
-    projectId: params.projectId,
-    userId: params.userId,
-  });
-  const providerConnections = await fetchProviderConnections(supabase, {
-    userId: params.userId,
-  });
+  const [project, base, providerConnections, internalDefinitions, internalEnablements] = await Promise.all([
+    fetchProject(supabase, {
+      projectId: params.projectId,
+      userId: params.userId,
+    }),
+    resolveProjectTools(supabase, {
+      projectId: params.projectId,
+      userId: params.userId,
+    }),
+    fetchProviderConnections(supabase, {
+      userId: params.userId,
+    }),
+    fetchInternalToolDefinitionsWithFallback(supabase),
+    fetchProjectInternalToolEnablements(supabase, {
+      projectId: params.projectId,
+      userId: params.userId,
+    }).catch(() => []),
+  ]);
+  const internalEnablementBySlug = new Map(
+    internalEnablements.map((enablement) => [enablement.toolSlug, enablement.isEnabled]),
+  );
+  const enabledInternalDefinitions = internalDefinitions
+    .filter((definition) =>
+      isInternalDefinitionVisible({
+        definition,
+        companyKey: project.companyKey,
+        projectId: params.projectId,
+      }),
+    )
+    .filter((definition) =>
+      isInternalDefinitionEnabled({
+        definition,
+        enablement: internalEnablementBySlug.get(definition.slug),
+      }),
+    );
+  const internalToolkitSlugs = enabledInternalDefinitions.map((definition) => definition.toolkitSlug);
   const readiness = resolveToolkitReadiness({
     selectedToolkitSlugs: base.selectedToolkitSlugs,
     providerConnections,
+    internalToolkitSlugs,
   });
 
   const activeConnections = providerConnections.filter(
@@ -402,7 +584,7 @@ export async function resolveProjectToolRuntime(
     .map((item) => ({
       toolkitSlug: item.toolkitSlug,
       reason: item.status as Exclude<typeof item.status, "ready">,
-      message: item.message,
+        message: item.message,
     }));
 
   if (!params.query?.trim()) {
@@ -414,7 +596,7 @@ export async function resolveProjectToolRuntime(
   }
 
   const searchableConnections = activeConnections.filter((connection) => connection.composioSessionId);
-  const toolCandidates = (
+  const composioCandidates = (
     await Promise.all(
       searchableConnections.map((connection) =>
         searchToolkitTools({
@@ -424,6 +606,14 @@ export async function resolveProjectToolRuntime(
       ),
     )
   ).flat();
+  const internalToolCandidates = resolveInternalToolCandidates({
+    definitions: internalDefinitions,
+    enablementBySlug: internalEnablementBySlug,
+    companyKey: project.companyKey,
+    projectId: params.projectId,
+    query: params.query.trim(),
+  });
+  const toolCandidates = [...internalToolCandidates, ...composioCandidates];
 
   return {
     ...base,
@@ -440,6 +630,7 @@ export async function executeResolvedTool(params: {
   onEvent?: (event: ToolRuntimeEvent) => void;
 }): Promise<ToolExecutionResult> {
   const inputSummary = safeJsonSummary(params.input);
+  const startedAt = Date.now();
 
   params.onEvent?.({
     type: "tool_call_started",
@@ -464,8 +655,13 @@ export async function executeResolvedTool(params: {
       inputSummary,
       resultSummary: reason,
       metadata: {
+        source: params.candidate.source,
+        executorKey: params.candidate.executorKey,
         executionMode: params.candidate.executionMode,
         riskLevel: params.candidate.riskLevel,
+        approvalPolicy: params.candidate.approvalPolicy,
+        approvalState: "required",
+        durationMs: Date.now() - startedAt,
       },
     });
 
@@ -486,16 +682,34 @@ export async function executeResolvedTool(params: {
     };
   }
 
-  const session = await getComposioSession(params.candidate.sessionId);
-
   try {
-    const result = (await session.execute(
-      params.candidate.toolSlug,
-      params.input,
-    )) as ToolRouterExecuteResponse;
+    const result =
+      params.candidate.source === "composio_session"
+        ? await (async () => {
+            if (!params.candidate.sessionId) {
+              throw new Error("Connected Composio tool is missing a session id.");
+            }
+            const session = await getComposioSession(params.candidate.sessionId);
+            return (await session.execute(
+              params.candidate.toolSlug,
+              params.input,
+            )) as ToolRouterExecuteResponse;
+          })()
+        : await executeInternalTool({
+            supabase: params.supabase,
+            context: params.context,
+            candidate: params.candidate,
+            input: params.input,
+          }).then((internalResult) => ({
+            data: (internalResult.data ?? {}) as Record<string, unknown>,
+            error: internalResult.status === "failed" ? internalResult.message : null,
+            logId: internalResult.logId ?? "",
+          }));
     const status = result.error ? "failed" : "succeeded";
     const summary =
       result.error ?? safeJsonSummary(result.data) ?? `${params.candidate.title} completed.`;
+    const durationMs = Date.now() - startedAt;
+    const artifactIds = extractArtifactIds(result.data);
 
     await insertToolInvocation(params.supabase, {
       userId: params.context.userId,
@@ -509,9 +723,18 @@ export async function executeResolvedTool(params: {
       inputSummary,
       resultSummary: summary,
       metadata: {
+        source: params.candidate.source,
+        executorKey: params.candidate.executorKey,
         executionMode: params.candidate.executionMode,
         riskLevel: params.candidate.riskLevel,
-        logId: result.logId,
+        approvalPolicy: params.candidate.approvalPolicy,
+        approvalState:
+          params.candidate.executionMode === "write" || params.candidate.executionMode === "admin"
+            ? "granted"
+            : "not_required",
+        durationMs,
+        artifactIds,
+        ...(result.logId ? { logId: result.logId } : {}),
       },
     });
 
@@ -563,8 +786,16 @@ export async function executeResolvedTool(params: {
       inputSummary,
       resultSummary: message,
       metadata: {
+        source: params.candidate.source,
+        executorKey: params.candidate.executorKey,
         executionMode: params.candidate.executionMode,
         riskLevel: params.candidate.riskLevel,
+        approvalPolicy: params.candidate.approvalPolicy,
+        approvalState:
+          params.candidate.executionMode === "write" || params.candidate.executionMode === "admin"
+            ? "granted"
+            : "not_required",
+        durationMs: Date.now() - startedAt,
       },
     });
 
@@ -621,8 +852,12 @@ export function createLangChainTools(params: {
         description: [
           candidate.description,
           candidate.executionGuidance ? `Guidance: ${candidate.executionGuidance}` : null,
+          `Source: ${candidate.source}.`,
           `Toolkit: ${candidate.toolkitSlug}.`,
           `Execution mode: ${candidate.executionMode}.`,
+          candidate.approvalPolicy === "confirm_writes"
+            ? "Write or admin actions require confirmation."
+            : null,
         ]
           .filter(Boolean)
           .join(" "),

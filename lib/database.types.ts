@@ -344,6 +344,72 @@ export type Database = {
           },
         ]
       }
+      internal_tool_definitions: {
+        Row: {
+          approval_policy: Database["public"]["Enums"]["tool_approval_policy"]
+          capabilities: string[]
+          created_at: string
+          description: string
+          enabled_by_default: boolean
+          execution_mode: string
+          executor_key: string
+          id: string
+          input_schema: Json | null
+          metadata: Json
+          output_schema: Json | null
+          requires_connection: boolean
+          risk_level: string
+          slug: string
+          source: Database["public"]["Enums"]["internal_tool_source"]
+          tags: string[]
+          title: string
+          toolkit_slug: string
+          updated_at: string
+        }
+        Insert: {
+          approval_policy?: Database["public"]["Enums"]["tool_approval_policy"]
+          capabilities?: string[]
+          created_at?: string
+          description: string
+          enabled_by_default?: boolean
+          execution_mode: string
+          executor_key: string
+          id?: string
+          input_schema?: Json | null
+          metadata?: Json
+          output_schema?: Json | null
+          requires_connection?: boolean
+          risk_level: string
+          slug: string
+          source: Database["public"]["Enums"]["internal_tool_source"]
+          tags?: string[]
+          title: string
+          toolkit_slug: string
+          updated_at?: string
+        }
+        Update: {
+          approval_policy?: Database["public"]["Enums"]["tool_approval_policy"]
+          capabilities?: string[]
+          created_at?: string
+          description?: string
+          enabled_by_default?: boolean
+          execution_mode?: string
+          executor_key?: string
+          id?: string
+          input_schema?: Json | null
+          metadata?: Json
+          output_schema?: Json | null
+          requires_connection?: boolean
+          risk_level?: string
+          slug?: string
+          source?: Database["public"]["Enums"]["internal_tool_source"]
+          tags?: string[]
+          title?: string
+          toolkit_slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       memory_records: {
         Row: {
           company_key: string
@@ -809,6 +875,58 @@ export type Database = {
           },
         ]
       }
+      project_internal_tool_enablements: {
+        Row: {
+          created_at: string
+          id: string
+          is_enabled: boolean
+          project_id: string
+          tool_slug: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          project_id: string
+          tool_slug: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          project_id?: string
+          tool_slug?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_internal_tool_enablements_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_internal_tool_enablements_tool_slug_fkey"
+            columns: ["tool_slug"]
+            isOneToOne: false
+            referencedRelation: "internal_tool_definitions"
+            referencedColumns: ["slug"]
+          },
+          {
+            foreignKeyName: "project_internal_tool_enablements_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_toolkit_selections: {
         Row: {
           created_at: string
@@ -1013,12 +1131,14 @@ export type Database = {
           description: string | null
           execution_strategy: string
           id: string
+          optional_toolkit_slugs: string[]
           position: number
           required_tool_ids: string[]
           required_toolkit_slugs: string[]
           run_id: string
           status: Database["public"]["Enums"]["task_status"]
           title: string
+          tool_requirement: string
           tool_summary: string | null
           updated_at: string
         }
@@ -1030,12 +1150,14 @@ export type Database = {
           description?: string | null
           execution_strategy?: string
           id?: string
+          optional_toolkit_slugs?: string[]
           position?: number
           required_tool_ids?: string[]
           required_toolkit_slugs?: string[]
           run_id: string
           status?: Database["public"]["Enums"]["task_status"]
           title: string
+          tool_requirement?: string
           tool_summary?: string | null
           updated_at?: string
         }
@@ -1047,12 +1169,14 @@ export type Database = {
           description?: string | null
           execution_strategy?: string
           id?: string
+          optional_toolkit_slugs?: string[]
           position?: number
           required_tool_ids?: string[]
           required_toolkit_slugs?: string[]
           run_id?: string
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
+          tool_requirement?: string
           tool_summary?: string | null
           updated_at?: string
         }
@@ -1366,6 +1490,7 @@ export type Database = {
         | "review_ready"
         | "executing"
         | "archived"
+      internal_tool_source: "internal_builtin" | "internal_custom"
       memory_kind:
         | "objective"
         | "decision"
@@ -1384,6 +1509,7 @@ export type Database = {
         | "blocked"
         | "failed"
       task_status: "waiting" | "underway" | "complete"
+      tool_approval_policy: "none" | "confirm_writes"
       toolkit_connection_status:
         | "not_connected"
         | "initiated"
@@ -1531,6 +1657,7 @@ export const Constants = {
         "executing",
         "archived",
       ],
+      internal_tool_source: ["internal_builtin", "internal_custom"],
       memory_kind: [
         "objective",
         "decision",
@@ -1551,6 +1678,7 @@ export const Constants = {
         "failed",
       ],
       task_status: ["waiting", "underway", "complete"],
+      tool_approval_policy: ["none", "confirm_writes"],
       toolkit_connection_status: [
         "not_connected",
         "initiated",

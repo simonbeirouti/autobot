@@ -85,12 +85,85 @@ export type ProviderConnection = {
   updatedAt: string;
 };
 
+export type ToolSource = "internal_builtin" | "internal_custom" | "composio_session";
+
+export type ToolApprovalPolicy = "none" | "confirm_writes";
+
 export type ProjectToolkitSelection = {
   id: string;
   projectId: string;
   userId: string;
   toolkitSlug: string;
   createdAt: string;
+};
+
+export type InternalToolDefinition = {
+  id: string;
+  slug: string;
+  toolkitSlug: string;
+  source: Exclude<ToolSource, "composio_session">;
+  title: string;
+  description: string;
+  executionMode: ToolExecutionMode;
+  riskLevel: ToolRiskLevel;
+  executorKey: string;
+  inputSchema: Record<string, unknown> | null;
+  outputSchema: Record<string, unknown> | null;
+  tags: string[];
+  capabilities: string[];
+  approvalPolicy: ToolApprovalPolicy;
+  requiresConnection: boolean;
+  enabledByDefault: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InternalToolHandlerType = "builtin" | "http_request";
+
+export type InternalToolScope = {
+  companyKey: string | null;
+  projectIds: string[];
+};
+
+export type InternalToolHttpConfig = {
+  handlerType: "http_request";
+  endpointUrl: string;
+  method: "GET" | "POST";
+  headers: Record<string, string>;
+  includeContext: boolean;
+  timeoutMs: number;
+};
+
+export type InternalToolExecutorConfig =
+  | {
+      handlerType: "builtin";
+    }
+  | InternalToolHttpConfig;
+
+export type ProjectInternalToolEnablement = {
+  id: string;
+  projectId: string;
+  userId: string;
+  toolSlug: string;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InternalToolCatalogRecord = InternalToolDefinition & {
+  projectEnabled: boolean;
+};
+
+export type InternalToolCatalog = {
+  generatedAt: string;
+  toolCount: number;
+  tools: InternalToolCatalogRecord[];
+};
+
+export type InternalToolDetailPayload = {
+  generatedAt: string;
+  tool: InternalToolCatalogRecord;
 };
 
 export type ToolOnboardingPayload = {
@@ -124,9 +197,11 @@ export type ToolActionTarget = {
 
 export type ToolTaskPlanItem = {
   title: string;
+  toolRequirement: "none" | "optional" | "required";
   executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
   toolSummary: string | null;
   requiredToolkitSlugs: string[];
+  optionalToolkitSlugs: string[];
 };
 
 export type ToolPreflightToolkit = {
@@ -160,7 +235,11 @@ export type ResolvedToolCandidate = {
   id: string;
   toolSlug: string;
   toolkitSlug: string;
-  sessionId: string;
+  source: ToolSource;
+  executorKey: string;
+  config: Record<string, unknown>;
+  sessionId?: string | null;
+  requiresConnection: boolean;
   title: string;
   description: string;
   inputSchema: Record<string, unknown> | null;
@@ -170,6 +249,9 @@ export type ResolvedToolCandidate = {
   supportsChat: boolean;
   supportsRunTasks: boolean;
   executionGuidance: string | null;
+  capabilities: string[];
+  tags: string[];
+  approvalPolicy: ToolApprovalPolicy;
 };
 
 export type ToolRuntimeContext = {

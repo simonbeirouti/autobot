@@ -4,9 +4,12 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 
 import type { MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BotIcon,
   BlocksIcon,
   CheckCircle2Icon,
+  FileJsonIcon,
   ExternalLinkIcon,
+  FlaskConicalIcon,
   KeyRoundIcon,
   Link2Icon,
   LoaderCircleIcon,
@@ -38,6 +41,10 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { useProject } from "@/components/providers/project-provider";
 import {
   Sheet,
   SheetContent,
@@ -52,7 +59,11 @@ import type {
   ComposioToolCatalog,
   ComposioToolDetailRecord,
   ComposioToolkitRecord,
+  InternalToolCatalog,
+  InternalToolCatalogRecord,
+  InternalToolDetailPayload,
   ProviderConnection,
+  ToolExecutionResult,
   ToolkitConnectionStatus,
 } from "@/lib/tools/types";
 import { cn } from "@/lib/utils";
@@ -90,9 +101,70 @@ type SaveApiKeyResponse = {
   verified: boolean;
 };
 
+type InvokeInternalToolResponse = ToolExecutionResult;
+
 async function fetchComposioToolCatalog() {
   return fetchJson<ComposioToolCatalog>("/api/tools", {
     cache: "no-store",
+  });
+}
+
+async function fetchInternalToolCatalog(projectId?: string | null) {
+  const search = projectId ? `?projectId=${projectId}` : "";
+  return fetchJson<InternalToolCatalog>(`/api/tools/internal${search}`, {
+    cache: "no-store",
+  });
+}
+
+async function fetchInternalToolDetail(toolSlug: string, projectId?: string | null) {
+  const search = projectId ? `?projectId=${projectId}` : "";
+  return fetchJson<InternalToolDetailPayload>(`/api/tools/internal/${toolSlug}${search}`, {
+    cache: "no-store",
+  });
+}
+
+async function updateInternalToolEnablement({
+  toolSlug,
+  projectId,
+  isEnabled,
+}: {
+  toolSlug: string;
+  projectId: string;
+  isEnabled: boolean;
+}) {
+  return fetchJson<InternalToolDetailPayload>(`/api/tools/internal/${toolSlug}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      projectId,
+      isEnabled,
+    }),
+  });
+}
+
+async function invokeInternalTool({
+  toolSlug,
+  projectId,
+  input,
+  confirmedWriteActions,
+}: {
+  toolSlug: string;
+  projectId?: string | null;
+  input: Record<string, unknown>;
+  confirmedWriteActions: boolean;
+}) {
+  return fetchJson<InvokeInternalToolResponse>(`/api/tools/internal/${toolSlug}/invoke`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      projectId,
+      input,
+      confirmedWriteActions,
+    }),
   });
 }
 
@@ -229,6 +301,115 @@ function normalizeCatalog(catalog: ComposioToolCatalog | undefined): ComposioToo
     categories,
     toolkits,
   };
+}
+
+function normalizeInternalCatalog(catalog: InternalToolCatalog | undefined) {
+  if (!catalog) {
+    return null;
+  }
+
+  return {
+    ...catalog,
+    tools: Array.isArray(catalog.tools) ? catalog.tools : [],
+  } satisfies InternalToolCatalog;
+}
+
+function matchesInternalToolSearch(tool: InternalToolCatalogRecord, query: string) {
+  if (!query) {
+    return true;
+  }
+
+  const haystack = [
+    tool.title,
+    tool.slug,
+    tool.description,
+    tool.executorKey,
+    tool.source,
+    ...tool.tags,
+    ...tool.capabilities,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(query);
+}
+
+function getInternalToolStatusMeta(tool: InternalToolCatalogRecord) {
+  return {
+    label: tool.projectEnabled ? "Enabled" : "Disabled",
+    tone: tool.projectEnabled ? "text-foreground" : "text-muted-foreground",
+    variant: tool.projectEnabled ? ("secondary" as const) : ("outline" as const),
+  };
+}
+
+function getInternalToolScopeLabel(tool: InternalToolCatalogRecord) {
+  const companyKey =
+    typeof tool.metadata.companyKey === "string" && tool.metadata.companyKey.trim().length > 0
+      ? tool.metadata.companyKey
+      : null;
+  const projectIds = Array.isArray(tool.metadata.projectIds)
+    ? tool.metadata.projectIds.filter((value): value is string => typeof value === "string")
+    : [];
+
+  if (tool.source === "internal_builtin") {
+    return "First-party";
+  }
+
+  if (projectIds.length > 0) {
+    return "Project scoped";
+  }
+
+  if (companyKey) {
+    return "Company scoped";
+  }
+
+  return "Custom";
+}
+
+function getInternalToolSampleInput(toolSlug: string) {
+  switch (toolSlug) {
+    case "page_extractor":
+      return {
+        url: "https://example.com",
+        extractionMode: "standard",
+      };
+    case "web_search":
+      return {
+        query: "best llm observability platforms",
+        domainFilters: [],
+        resultLimit: 5,
+      };
+    case "artifact_store":
+      return {
+        label: "Internal tool smoke test",
+        assetType: "test_note",
+        content: "This is a stored artifact created from the internal tools dashboard.",
+        metadata: {
+          source: "tools-dashboard",
+        },
+        writeMemorySummary: false,
+        summary: "",
+      };
+    case "site_crawler":
+      return {
+        rootUrl: "https://example.com",
+        pageLimit: 5,
+        depthLimit: 1,
+        stayWithinPath: true,
+      };
+    case "document_search":
+      return {
+        query: "project brief",
+        resultLimit: 5,
+        includeMemory: true,
+      };
+    default:
+      return {};
+  }
+}
+
+function toolNeedsProjectContext(toolSlug: string) {
+  return toolSlug === "artifact_store" || toolSlug === "site_crawler" || toolSlug === "document_search";
 }
 
 export function ToolsDashboardSkeleton() {
@@ -430,15 +611,31 @@ function ToolkitLogo({
   );
 }
 
-function buildToolsHref(pathname: string, toolkitSlug?: string | null, connection?: string | null) {
+function buildToolsHref(
+  pathname: string,
+  options: {
+    toolkitSlug?: string | null;
+    internalToolSlug?: string | null;
+    connection?: string | null;
+    source?: "internal" | "composio" | null;
+  } = {},
+) {
   const params = new URLSearchParams();
 
-  if (toolkitSlug) {
-    params.set("toolkit", toolkitSlug);
+  if (options.toolkitSlug) {
+    params.set("toolkit", options.toolkitSlug);
   }
 
-  if (connection) {
-    params.set("connection", connection);
+  if (options.internalToolSlug) {
+    params.set("internalTool", options.internalToolSlug);
+  }
+
+  if (options.connection) {
+    params.set("connection", options.connection);
+  }
+
+  if (options.source) {
+    params.set("source", options.source);
   }
 
   return params.size > 0 ? `${pathname}?${params.toString()}` : pathname;
@@ -553,20 +750,32 @@ export function ToolsDashboardClient({
 }: {
   initialCatalog?: ComposioToolCatalog;
 }) {
+  const { activeProjectDisplay, activeProjectId, isLoading: isProjectLoading } = useProject();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [storedCatalog] = useState<ComposioToolCatalog | null>(() => readStoredCatalogSnapshot());
-  const [search, setSearch] = useState("");
+  const [toolSourceTab, setToolSourceTab] = useState<"internal" | "composio">(
+    (searchParams.get("source") as "internal" | "composio" | null) ?? "internal",
+  );
+  const [internalSearch, setInternalSearch] = useState("");
+  const [composioSearch, setComposioSearch] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
   const [openToolkitSlug, setOpenToolkitSlug] = useState<string>(
     searchParams.get("toolkit") ?? "",
   );
+  const [openInternalToolSlug, setOpenInternalToolSlug] = useState<string>(
+    searchParams.get("internalTool") ?? "",
+  );
   const [apiKeyDialogToolkitSlug, setApiKeyDialogToolkitSlug] = useState<string>("");
   const [apiKeyValue, setApiKeyValue] = useState("");
   const [isCategoryDrawerOpen, setIsCategoryDrawerOpen] = useState(false);
-  const deferredSearch = useDeferredValue(search.trim().toLowerCase());
+  const [internalInputValue, setInternalInputValue] = useState("{}");
+  const [allowWriteExecution, setAllowWriteExecution] = useState(false);
+  const [internalExecutionResult, setInternalExecutionResult] = useState<string>("");
+  const deferredInternalSearch = useDeferredValue(internalSearch.trim().toLowerCase());
+  const deferredComposioSearch = useDeferredValue(composioSearch.trim().toLowerCase());
   const connectionResult = searchParams.get("connection");
 
   const catalogQuery = useQuery({
@@ -582,6 +791,12 @@ export function ToolsDashboardClient({
   });
 
   const catalog = normalizeCatalog(catalogQuery.data);
+  const internalCatalogQuery = useQuery({
+    queryKey: dashboardQueryKeys.tools.internalCatalog(activeProjectId),
+    queryFn: () => fetchInternalToolCatalog(activeProjectId),
+    staleTime: dashboardQueryTimings.tools.staleTime,
+  });
+  const internalCatalog = normalizeInternalCatalog(internalCatalogQuery.data);
 
   useEffect(() => {
     persistCatalogSnapshot(catalog);
@@ -592,8 +807,8 @@ export function ToolsDashboardClient({
       return [];
     }
 
-    return catalog.toolkits.filter((toolkit) => matchesToolkitSearch(toolkit, deferredSearch));
-  }, [catalog, deferredSearch]);
+    return catalog.toolkits.filter((toolkit) => matchesToolkitSearch(toolkit, deferredComposioSearch));
+  }, [catalog, deferredComposioSearch]);
 
   const visibleCategories = useMemo(() => {
     if (!catalog) {
@@ -641,8 +856,20 @@ export function ToolsDashboardClient({
     );
   }, [filteredToolkits, selectedCategoryId]);
 
+  const internalToolOptions = useMemo(() => {
+    if (!internalCatalog) {
+      return [];
+    }
+
+    return internalCatalog.tools
+      .filter((tool) => matchesInternalToolSearch(tool, deferredInternalSearch))
+      .toSorted((left, right) => left.title.localeCompare(right.title));
+  }, [deferredInternalSearch, internalCatalog]);
+
   const selectedToolkit =
     catalog?.toolkits.find((toolkit) => toolkit.slug === openToolkitSlug) ?? null;
+  const selectedInternalTool =
+    internalCatalog?.tools.find((tool) => tool.slug === openInternalToolSlug) ?? null;
 
   const apiKeyDialogToolkit =
     catalog?.toolkits.find((toolkit) => toolkit.slug === apiKeyDialogToolkitSlug) ?? null;
@@ -651,6 +878,12 @@ export function ToolsDashboardClient({
     queryKey: dashboardQueryKeys.tools.toolkit(openToolkitSlug),
     queryFn: () => fetchToolkitTools(openToolkitSlug),
     enabled: Boolean(openToolkitSlug),
+    staleTime: dashboardQueryTimings.tools.staleTime,
+  });
+  const internalToolQuery = useQuery({
+    queryKey: dashboardQueryKeys.tools.internalTool(openInternalToolSlug, activeProjectId),
+    queryFn: () => fetchInternalToolDetail(openInternalToolSlug, activeProjectId),
+    enabled: Boolean(openInternalToolSlug),
     staleTime: dashboardQueryTimings.tools.staleTime,
   });
 
@@ -706,6 +939,105 @@ export function ToolsDashboardClient({
       );
     },
   });
+  const internalEnablementMutation = useMutation({
+    mutationFn: updateInternalToolEnablement,
+    onMutate: async (variables) => {
+      const catalogKey = dashboardQueryKeys.tools.internalCatalog(activeProjectId);
+      const detailKey = dashboardQueryKeys.tools.internalTool(variables.toolSlug, activeProjectId);
+
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: catalogKey }),
+        queryClient.cancelQueries({ queryKey: detailKey }),
+      ]);
+
+      const previousCatalog = queryClient.getQueryData<InternalToolCatalog>(catalogKey);
+      const previousDetail = queryClient.getQueryData<InternalToolDetailPayload>(detailKey);
+
+      queryClient.setQueryData<InternalToolCatalog | undefined>(catalogKey, (current) =>
+        current
+          ? {
+              ...current,
+              tools: current.tools.map((tool) =>
+                tool.slug === variables.toolSlug
+                  ? {
+                      ...tool,
+                      projectEnabled: variables.isEnabled,
+                    }
+                  : tool,
+              ),
+            }
+          : current,
+      );
+      queryClient.setQueryData<InternalToolDetailPayload | undefined>(detailKey, (current) =>
+        current
+          ? {
+              ...current,
+              tool: {
+                ...current.tool,
+                projectEnabled: variables.isEnabled,
+              },
+            }
+          : current,
+      );
+
+      return {
+        previousCatalog,
+        previousDetail,
+      };
+    },
+    onSuccess: async (payload) => {
+      queryClient.setQueryData<InternalToolCatalog | undefined>(
+        dashboardQueryKeys.tools.internalCatalog(activeProjectId),
+        (current) =>
+          current
+            ? {
+                ...current,
+                tools: current.tools.map((tool) =>
+                  tool.slug === payload.tool.slug ? payload.tool : tool,
+                ),
+              }
+            : current,
+      );
+      queryClient.setQueryData<InternalToolDetailPayload | undefined>(
+        dashboardQueryKeys.tools.internalTool(payload.tool.slug, activeProjectId),
+        payload,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.tools.internalCatalog(activeProjectId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.tools.internalTool(payload.tool.slug, activeProjectId),
+        }),
+      ]);
+      toast.success(`${payload.tool.title} ${payload.tool.projectEnabled ? "enabled" : "disabled"} for ${activeProjectDisplay?.name ?? "this project"}.`);
+    },
+    onError: (error, variables, context) => {
+      if (context?.previousCatalog) {
+        queryClient.setQueryData(
+          dashboardQueryKeys.tools.internalCatalog(activeProjectId),
+          context.previousCatalog,
+        );
+      }
+      if (context?.previousDetail) {
+        queryClient.setQueryData(
+          dashboardQueryKeys.tools.internalTool(variables.toolSlug, activeProjectId),
+          context.previousDetail,
+        );
+      }
+      toast.error(error instanceof Error ? error.message : "Unable to update tool settings.");
+    },
+  });
+  const internalInvokeMutation = useMutation({
+    mutationFn: invokeInternalTool,
+    onSuccess: (result) => {
+      setInternalExecutionResult(JSON.stringify(result, null, 2));
+      toast.success("Internal tool executed.");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Unable to execute internal tool.");
+    },
+  });
 
   function handleToolkitAction(toolkit: ComposioToolkitRecord, mode: "oauth" | "api_key") {
     if (mode === "api_key") {
@@ -724,6 +1056,22 @@ export function ToolsDashboardClient({
   }, [openToolkitSlug, toolkitOptions]);
 
   useEffect(() => {
+    if (openInternalToolSlug && !internalToolOptions.some((tool) => tool.slug === openInternalToolSlug)) {
+      setOpenInternalToolSlug("");
+    }
+  }, [internalToolOptions, openInternalToolSlug]);
+
+  useEffect(() => {
+    if (!selectedInternalTool) {
+      return;
+    }
+
+    setInternalInputValue(JSON.stringify(getInternalToolSampleInput(selectedInternalTool.slug), null, 2));
+    setAllowWriteExecution(false);
+    setInternalExecutionResult("");
+  }, [selectedInternalTool]);
+
+  useEffect(() => {
     if (!connectionResult) {
       return;
     }
@@ -739,9 +1087,16 @@ export function ToolsDashboardClient({
     }
 
     startTransition(() => {
-      router.replace(buildToolsHref(pathname, openToolkitSlug), { scroll: false });
+      router.replace(
+        buildToolsHref(pathname, {
+          toolkitSlug: openToolkitSlug,
+          internalToolSlug: openInternalToolSlug,
+          source: toolSourceTab,
+        }),
+        { scroll: false },
+      );
     });
-  }, [connectionResult, openToolkitSlug, pathname, queryClient, router]);
+  }, [connectionResult, openInternalToolSlug, openToolkitSlug, pathname, queryClient, router, toolSourceTab]);
 
   if (catalogQuery.isLoading) {
     return <ToolsDashboardSkeleton />;
@@ -755,9 +1110,21 @@ export function ToolsDashboardClient({
       <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         className="pl-9"
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search toolkits"
-        value={search}
+        onChange={(event) => setComposioSearch(event.target.value)}
+        placeholder="Search integrations"
+        value={composioSearch}
+      />
+    </div>
+  );
+
+  const internalSearchField = (
+    <div className="relative w-full max-w-sm">
+      <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        className="pl-9"
+        onChange={(event) => setInternalSearch(event.target.value)}
+        placeholder="Search internal tools"
+        value={internalSearch}
       />
     </div>
   );
@@ -796,6 +1163,12 @@ export function ToolsDashboardClient({
       ) : null}
     </>
   );
+
+  const internalSheetTool = internalToolQuery.data?.tool ?? selectedInternalTool;
+  const internalMetaBadgeClassName =
+    "h-5 rounded-sm border-border/70 px-2 text-[11px] font-normal tracking-normal text-muted-foreground";
+  const internalCapabilityBadgeClassName =
+    "h-6 rounded-sm border-border/70 bg-muted/40 px-2.5 text-[11px] font-medium text-foreground";
 
   return (
     <>
@@ -865,149 +1238,313 @@ export function ToolsDashboardClient({
         </DialogContent>
       </Dialog>
 
-      <ToolsSplitLayout
-        sidebar={
-          <WorkspaceSidebarPanel
-            className="hidden min-h-[260px] max-h-[40vh] sm:min-h-[320px] sm:max-h-[45vh] lg:flex lg:min-h-0 lg:max-h-none"
-            description="Choose a category to browse its toolkits."
-            headerAction={categorySearchField}
-            headerActionFullWidth
-            title="Categories"
-          >
-            {categoryList}
-          </WorkspaceSidebarPanel>
-        }
-        content={
+      <Tabs
+        className="min-h-0 flex-1"
+        onValueChange={(value) => {
+          const next = value as "internal" | "composio";
+          setToolSourceTab(next);
+          startTransition(() => {
+            router.replace(
+              buildToolsHref(pathname, {
+                toolkitSlug: openToolkitSlug,
+                internalToolSlug: openInternalToolSlug,
+                source: next,
+              }),
+              { scroll: false },
+            );
+          });
+        }}
+        value={toolSourceTab}
+      >
+        <div className="flex items-center justify-between gap-3 border bg-background px-4 py-3">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tools</p>
+            <h1 className="text-lg font-semibold">Tool sources</h1>
+          </div>
+          <TabsList>
+            <TabsTrigger value="internal">
+              <BotIcon className="size-3.5" />
+              Internal
+            </TabsTrigger>
+            <TabsTrigger value="composio">
+              <BlocksIcon className="size-3.5" />
+              Composio
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent className="min-h-0 flex-1" value="internal">
           <div className="flex h-full min-h-0 flex-col overflow-hidden border bg-background">
-            <div className="shrink-0 border-b px-4 py-3 lg:hidden">
-              <Button
-                className="h-auto w-full items-center justify-between gap-3 px-4 py-3 text-left"
-                onClick={() => setIsCategoryDrawerOpen(true)}
-                type="button"
-                variant="outline"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <PanelLeftIcon className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0">
-                    <span className="block text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                      Categories
-                    </span>
-                    <span className="block truncate text-sm font-medium">{selectedCategoryName}</span>
-                  </span>
-                </span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {visibleCategories.length}
-                </span>
-              </Button>
+            <div className="shrink-0 border-b px-4 py-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-1">
+                  <h1 className="text-lg font-semibold">First-party internal tools</h1>
+                  <p className="text-sm text-muted-foreground">
+                    Built-in AutoBot tools that work without external integrations.
+                  </p>
+                </div>
+                {internalSearchField}
+              </div>
             </div>
 
-            {selectedCategoryId ? (
-              <>
-                <div className="shrink-0 border-b px-4 py-4">
-                  <div className="space-y-1">
-                    <h1 className="text-lg font-semibold">{selectedCategoryName}</h1>
-                    <p className="text-sm text-muted-foreground">
-                      Browse matching toolkits and open a card to inspect its tools.
-                    </p>
-                  </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {internalCatalogQuery.isLoading || isProjectLoading ? (
+                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <div className="border bg-card p-4" key={index}>
+                      <Skeleton className="h-5 w-36" />
+                      <Skeleton className="mt-3 h-4 w-full" />
+                      <Skeleton className="mt-2 h-4 w-4/5" />
+                    </div>
+                  ))}
                 </div>
+              ) : internalCatalogQuery.error instanceof Error ? (
+                <div className="border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  {internalCatalogQuery.error.message}
+                </div>
+              ) : internalToolOptions.length === 0 ? (
+                <div className="flex min-h-[240px] items-center justify-center border bg-background px-6 text-center">
+                  <div className="space-y-3">
+                    <BotIcon className="mx-auto size-10 text-muted-foreground" />
+                      <div className="space-y-1">
+                        <p className="font-medium">No matching internal tools</p>
+                        <p className="text-sm text-muted-foreground">Try a different internal-tools search term.</p>
+                      </div>
+                    </div>
+                  </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                  {internalToolOptions.map((tool) => {
+                    const statusMeta = getInternalToolStatusMeta(tool);
 
-                <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                  {toolkitOptions.length === 0 ? (
-                    <div className="flex min-h-[240px] items-center justify-center border bg-background px-6 text-center">
+                    return (
+                      <Card
+                        className="cursor-pointer border-border py-0 transition-colors hover:bg-muted"
+                        key={tool.slug}
+                        onClick={() => setOpenInternalToolSlug(tool.slug)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setOpenInternalToolSlug(tool.slug);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <CardContent className="flex h-[220px] flex-col p-4">
+                          <div className="flex items-start gap-4">
+                            <div className="flex size-12 shrink-0 items-center justify-center border bg-muted">
+                              <BotIcon className="size-5 text-foreground" />
+                            </div>
+                            <div className="min-w-0 flex-1 space-y-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <h2 className="truncate text-base font-semibold">{tool.title}</h2>
+                                  <p className="mt-1 break-all text-xs text-muted-foreground">{tool.slug}</p>
+                                </div>
+                                <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                              </div>
+                              <p className="line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge className={internalMetaBadgeClassName} variant="outline">
+                                  {tool.executionMode}
+                                </Badge>
+                                <Badge className={internalMetaBadgeClassName} variant="outline">
+                                  {tool.source}
+                                </Badge>
+                                <Badge className={internalMetaBadgeClassName} variant="outline">
+                                  {getInternalToolScopeLabel(tool)}
+                                </Badge>
+                                {tool.approvalPolicy === "confirm_writes" ? (
+                                  <Badge className={internalMetaBadgeClassName} variant="outline">
+                                    Approval required
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-auto flex items-end justify-between gap-3 pt-3">
+                            <div className="flex min-w-0 flex-wrap gap-1.5">
+                              {tool.capabilities.slice(0, 2).map((capability) => (
+                                <Badge
+                                  className={internalCapabilityBadgeClassName}
+                                  key={`${tool.slug}:${capability}`}
+                                  variant="outline"
+                                >
+                                  {capability}
+                                </Badge>
+                              ))}
+                            </div>
+                            <Button
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenInternalToolSlug(tool.slug);
+                              }}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              View
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent className="min-h-0 flex-1" value="composio">
+          <>
+            <ToolsSplitLayout
+              sidebar={
+                <WorkspaceSidebarPanel
+                  className="hidden min-h-[260px] max-h-[40vh] sm:min-h-[320px] sm:max-h-[45vh] lg:flex lg:min-h-0 lg:max-h-none"
+                  description="Choose a category to browse its toolkits."
+                  headerAction={categorySearchField}
+                  headerActionFullWidth
+                  title="Categories"
+                >
+                  {categoryList}
+                </WorkspaceSidebarPanel>
+              }
+              content={
+                <div className="flex h-full min-h-0 flex-col overflow-hidden border bg-background">
+                  <div className="shrink-0 border-b px-4 py-3 lg:hidden">
+                    <Button
+                      className="h-auto w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                      onClick={() => setIsCategoryDrawerOpen(true)}
+                      type="button"
+                      variant="outline"
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <PanelLeftIcon className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0">
+                          <span className="block text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                            Categories
+                          </span>
+                          <span className="block truncate text-sm font-medium">{selectedCategoryName}</span>
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {visibleCategories.length}
+                      </span>
+                    </Button>
+                  </div>
+
+                  {selectedCategoryId ? (
+                    <>
+                      <div className="shrink-0 border-b px-4 py-4">
+                        <div className="space-y-1">
+                          <h1 className="text-lg font-semibold">{selectedCategoryName}</h1>
+                          <p className="text-sm text-muted-foreground">
+                            Browse external integrations and open a card to inspect the tools Composio exposes.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                        {toolkitOptions.length === 0 ? (
+                          <div className="flex min-h-[240px] items-center justify-center border bg-background px-6 text-center">
+                            <div className="space-y-3">
+                              <BlocksIcon className="mx-auto size-10 text-muted-foreground" />
+                              <div className="space-y-1">
+                                <p className="font-medium">No matching toolkits</p>
+                                <p className="text-sm text-muted-foreground">
+                                  Try a broader search or choose a different category.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                            {toolkitOptions.map((toolkit) => (
+                              <Card
+                                className="cursor-pointer border-border py-0 transition-colors hover:bg-muted focus-within:border-primary focus-within:bg-muted"
+                                key={toolkit.slug}
+                                onClick={() => setOpenToolkitSlug(toolkit.slug)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    setOpenToolkitSlug(toolkit.slug);
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
+                              >
+                                <CardContent className="flex min-h-[112px] flex-col p-4">
+                                  <div className="flex w-full items-start gap-4 text-left">
+                                    <ToolkitLogo toolkit={toolkit} />
+
+                                    <div className="flex min-h-full min-w-0 flex-1 flex-col">
+                                      <div className="space-y-2">
+                                        <div className="flex items-start justify-between gap-3">
+                                          <div className="flex min-w-0 items-center gap-2">
+                                            <h2 className="truncate text-base font-semibold">{toolkit.name}</h2>
+                                            <ExternalLinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                                          </div>
+                                          <p className="shrink-0 text-xs text-muted-foreground">
+                                            {toolkit.toolCount} tools
+                                          </p>
+                                        </div>
+                                        <p className="line-clamp-2 text-sm text-muted-foreground">
+                                          {toolkit.description ?? "No description available for this toolkit yet."}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <ToolkitConnectionControls
+                                    connectMutation={connectMutation}
+                                    layout="inline"
+                                    onApiKey={() => handleToolkitAction(toolkit, "api_key")}
+                                    onOAuth={() => handleToolkitAction(toolkit, "oauth")}
+                                    toolkit={toolkit}
+                                  />
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex min-h-full items-center justify-center px-6 text-center">
                       <div className="space-y-3">
                         <BlocksIcon className="mx-auto size-10 text-muted-foreground" />
                         <div className="space-y-1">
-                          <p className="font-medium">No matching toolkits</p>
+                          <p className="font-medium">Select a category</p>
                           <p className="text-sm text-muted-foreground">
-                            Try a broader search or choose a different category.
+                            Choose a category from the sidebar to browse external integrations.
                           </p>
                         </div>
                       </div>
                     </div>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-                      {toolkitOptions.map((toolkit) => (
-                          <Card
-                            className="cursor-pointer border-border py-0 transition-colors hover:bg-muted focus-within:border-primary focus-within:bg-muted"
-                            key={toolkit.slug}
-                            onClick={() => setOpenToolkitSlug(toolkit.slug)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                setOpenToolkitSlug(toolkit.slug);
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                          >
-                            <CardContent className="flex min-h-[112px] flex-col p-4">
-                              <div className="flex w-full items-start gap-4 text-left">
-                                <ToolkitLogo toolkit={toolkit} />
-
-                                <div className="flex min-h-full min-w-0 flex-1 flex-col">
-                                  <div className="space-y-2">
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="flex min-w-0 items-center gap-2">
-                                        <h2 className="truncate text-base font-semibold">{toolkit.name}</h2>
-                                        <ExternalLinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                                      </div>
-                                      <p className="shrink-0 text-xs text-muted-foreground">
-                                        {toolkit.toolCount} tools
-                                      </p>
-                                    </div>
-                                    <p className="line-clamp-2 text-sm text-muted-foreground">
-                                      {toolkit.description ?? "No description available for this toolkit yet."}
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <ToolkitConnectionControls
-                                connectMutation={connectMutation}
-                                layout="inline"
-                                onApiKey={() => handleToolkitAction(toolkit, "api_key")}
-                                onOAuth={() => handleToolkitAction(toolkit, "oauth")}
-                                toolkit={toolkit}
-                              />
-                            </CardContent>
-                          </Card>
-                      ))}
-                    </div>
                   )}
                 </div>
-              </>
-            ) : (
-              <div className="flex min-h-full items-center justify-center px-6 text-center">
-                <div className="space-y-3">
-                  <BlocksIcon className="mx-auto size-10 text-muted-foreground" />
-                  <div className="space-y-1">
-                    <p className="font-medium">Select a category</p>
-                    <p className="text-sm text-muted-foreground">
-                      Choose a category from the sidebar to browse toolkits.
-                    </p>
+              }
+            />
+
+            <Drawer onOpenChange={setIsCategoryDrawerOpen} open={isCategoryDrawerOpen}>
+              <DrawerContent className="lg:hidden">
+                <DrawerHeader className="text-left">
+                  <DrawerTitle>Categories</DrawerTitle>
+                  <DrawerDescription>Choose a category to browse its toolkits.</DrawerDescription>
+                </DrawerHeader>
+                <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-4">
+                  {categorySearchField}
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    {categoryList}
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        }
-      />
-
-      <Drawer onOpenChange={setIsCategoryDrawerOpen} open={isCategoryDrawerOpen}>
-        <DrawerContent className="lg:hidden">
-          <DrawerHeader className="text-left">
-            <DrawerTitle>Categories</DrawerTitle>
-            <DrawerDescription>Choose a category to browse its toolkits.</DrawerDescription>
-          </DrawerHeader>
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-4">
-            {categorySearchField}
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {categoryList}
-            </div>
-          </div>
-        </DrawerContent>
-      </Drawer>
+              </DrawerContent>
+            </Drawer>
+          </>
+        </TabsContent>
+      </Tabs>
 
       <Sheet onOpenChange={(open) => !open && setOpenToolkitSlug("")} open={Boolean(selectedToolkit)}>
         <SheetContent className="flex w-[94vw] flex-col sm:max-w-2xl" side="right">
@@ -1031,27 +1568,27 @@ export function ToolsDashboardClient({
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <div className="space-y-4">
                   <article className="border bg-card p-4">
-                      <div className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{selectedToolkit.toolCount} tools</Badge>
-                          {selectedToolkit.noAuth ? <Badge variant="secondary">Open access</Badge> : null}
-                        </div>
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">{selectedToolkit.toolCount} tools</Badge>
+                        {selectedToolkit.noAuth ? <Badge variant="secondary">Open access</Badge> : null}
+                      </div>
 
-                        <div className="flex flex-wrap gap-2">
-                          {selectedToolkit.categories.map((category) => (
-                            <Badge key={`${selectedToolkit.slug}:${category.id}`} variant="outline">
-                              {category.name}
-                            </Badge>
-                          ))}
-                        </div>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedToolkit.categories.map((category) => (
+                          <Badge key={`${selectedToolkit.slug}:${category.id}`} variant="outline">
+                            {category.name}
+                          </Badge>
+                        ))}
+                      </div>
 
-                        {selectedToolkit.supportsApiKey && !selectedToolkit.supportsOAuth && selectedToolkit.connectionStatus === "active" ? (
-                          <p className="text-xs text-muted-foreground">
-                            API key saved
-                            {selectedToolkit.apiKeyLastFour ? ` ending in ${selectedToolkit.apiKeyLastFour}` : ""}.
-                            {selectedToolkit.apiKeyUpdatedAt ? ` Updated ${new Date(selectedToolkit.apiKeyUpdatedAt).toLocaleString()}.` : ""}
-                          </p>
-                        ) : null}
+                      {selectedToolkit.supportsApiKey && !selectedToolkit.supportsOAuth && selectedToolkit.connectionStatus === "active" ? (
+                        <p className="text-xs text-muted-foreground">
+                          API key saved
+                          {selectedToolkit.apiKeyLastFour ? ` ending in ${selectedToolkit.apiKeyLastFour}` : ""}.
+                          {selectedToolkit.apiKeyUpdatedAt ? ` Updated ${new Date(selectedToolkit.apiKeyUpdatedAt).toLocaleString()}.` : ""}
+                        </p>
+                      ) : null}
                     </div>
                   </article>
 
@@ -1073,9 +1610,7 @@ export function ToolsDashboardClient({
                               <p className="text-sm text-muted-foreground">
                                 {tool.description || "No description available for this tool yet."}
                               </p>
-
                               <p className="break-all text-xs text-muted-foreground">{tool.slug}</p>
-
                               <div className="flex flex-wrap gap-2">
                                 {tool.noAuth ? <Badge variant="secondary">No auth</Badge> : null}
                                 {tool.tags.slice(0, 8).map((tag) => (
@@ -1084,7 +1619,6 @@ export function ToolsDashboardClient({
                                   </Badge>
                                 ))}
                               </div>
-
                               {tool.scopes.length > 0 ? (
                                 <div className="space-y-1">
                                   <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
@@ -1128,6 +1662,187 @@ export function ToolsDashboardClient({
                   onOAuth={() => handleToolkitAction(selectedToolkit, "oauth")}
                   toolkit={selectedToolkit}
                 />
+              </div>
+            </>
+          ) : null}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        onOpenChange={(open) => !open && setOpenInternalToolSlug("")}
+        open={Boolean(internalSheetTool)}
+      >
+        <SheetContent className="flex w-[94vw] flex-col sm:max-w-2xl" side="right">
+          {internalSheetTool ? (
+            <>
+              <SheetHeader className="space-y-3 border-b pr-14">
+                <SheetTitle>{internalSheetTool.title}</SheetTitle>
+                <SheetDescription>{internalSheetTool.description}</SheetDescription>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">{internalSheetTool.source}</Badge>
+                  <Badge variant="outline">{internalSheetTool.executionMode}</Badge>
+                  <Badge variant="outline">{getInternalToolScopeLabel(internalSheetTool)}</Badge>
+                  <Badge variant={getInternalToolStatusMeta(internalSheetTool).variant}>
+                    {getInternalToolStatusMeta(internalSheetTool).label}
+                  </Badge>
+                  {internalSheetTool.approvalPolicy === "confirm_writes" ? (
+                    <Badge variant="outline">Approval required</Badge>
+                  ) : null}
+                </div>
+              </SheetHeader>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                <div className="space-y-4">
+                  <article className="border bg-card p-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Metadata</p>
+                          <p className="mt-1 break-all text-xs text-muted-foreground">{internalSheetTool.slug}</p>
+                        </div>
+                        {activeProjectId ? (
+                          <Button
+                            disabled={internalEnablementMutation.isPending}
+                            onClick={() =>
+                              internalEnablementMutation.mutate({
+                                toolSlug: internalSheetTool.slug,
+                                projectId: activeProjectId,
+                                isEnabled: !internalSheetTool.projectEnabled,
+                              })
+                            }
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            {internalSheetTool.projectEnabled ? "Disable" : "Enable"}
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {internalSheetTool.tags.map((tag) => (
+                          <Badge key={`${internalSheetTool.slug}:${tag}`} variant="outline">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {internalSheetTool.capabilities.map((capability) => (
+                          <Badge key={`${internalSheetTool.slug}:${capability}`} variant="outline">
+                            {capability}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </article>
+
+                  <article className="border bg-card p-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">Test input</p>
+                          <p className="text-xs text-muted-foreground">
+                            Edit the JSON payload and run the tool directly.
+                          </p>
+                        </div>
+                        <Button
+                          onClick={() =>
+                            setInternalInputValue(
+                              JSON.stringify(getInternalToolSampleInput(internalSheetTool.slug), null, 2),
+                            )
+                          }
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          <FileJsonIcon className="size-3.5" />
+                          Reset
+                        </Button>
+                      </div>
+
+                      <Textarea
+                        className="min-h-52 font-mono text-[11px]"
+                        onChange={(event) => setInternalInputValue(event.target.value)}
+                        value={internalInputValue}
+                      />
+
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={allowWriteExecution}
+                            disabled={internalSheetTool.executionMode === "read"}
+                            onCheckedChange={setAllowWriteExecution}
+                            size="sm"
+                          />
+                          <span className="text-xs text-muted-foreground">
+                            Allow write execution
+                          </span>
+                        </div>
+                        <Button
+                          disabled={
+                            internalInvokeMutation.isPending ||
+                            (toolNeedsProjectContext(internalSheetTool.slug) && !activeProjectId)
+                          }
+                          onClick={() => {
+                            try {
+                              const input = JSON.parse(internalInputValue) as Record<string, unknown>;
+                              setInternalExecutionResult("");
+                              internalInvokeMutation.mutate({
+                                toolSlug: internalSheetTool.slug,
+                                projectId: activeProjectId,
+                                input,
+                                confirmedWriteActions: allowWriteExecution,
+                              });
+                            } catch {
+                              toast.error("Input must be valid JSON.");
+                            }
+                          }}
+                          size="sm"
+                          type="button"
+                        >
+                          {internalInvokeMutation.isPending ? (
+                            <>
+                              <LoaderCircleIcon className="size-3.5 animate-spin" />
+                              Running
+                            </>
+                          ) : (
+                            <>
+                              <FlaskConicalIcon className="size-3.5" />
+                              Run test
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      {toolNeedsProjectContext(internalSheetTool.slug) && !activeProjectId ? (
+                        <p className="text-xs text-muted-foreground">
+                          Select an active project to test this tool.
+                        </p>
+                      ) : null}
+                    </div>
+                  </article>
+
+                  <article className="border bg-card p-4">
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium">Input schema</p>
+                      <Textarea
+                        className="min-h-40 font-mono text-[11px]"
+                        readOnly
+                        value={JSON.stringify(internalSheetTool.inputSchema ?? {}, null, 2)}
+                      />
+                    </div>
+                  </article>
+
+                  <article className="border bg-card p-4">
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium">Execution output</p>
+                      <Textarea
+                        className="min-h-48 font-mono text-[11px]"
+                        readOnly
+                        value={internalExecutionResult || "Run a test to inspect the tool output."}
+                      />
+                    </div>
+                  </article>
+                </div>
               </div>
             </>
           ) : null}

@@ -88,7 +88,9 @@ export type RunTask = {
   position: number;
   agentId: string | null;
   agentLabel: string | null;
+  toolRequirement: "none" | "optional" | "required";
   requiredToolkitSlugs: string[];
+  optionalToolkitSlugs: string[];
   requiredToolIds: string[];
   executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
   toolSummary: string | null;
