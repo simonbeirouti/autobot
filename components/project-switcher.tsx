@@ -1,7 +1,12 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { CheckIcon, ChevronsUpDown, FolderKanbanIcon, PlusIcon } from "lucide-react";
+import {
+  CheckIcon,
+  ChevronsUpDown,
+  FolderKanbanIcon,
+  PlusIcon,
+} from "lucide-react";
 
 import { useProject } from "@/components/providers/project-provider";
 import {
@@ -28,9 +33,11 @@ export function ProjectSwitcher() {
   const router = useRouter();
   const pathname = usePathname();
   const { isMobile } = useSidebar();
-  const { activeProject, projects, setActiveProjectId } = useProject();
+  const { activeProject, activeProjectDisplay, isLoading, projects, setActiveProjectId } =
+    useProject();
 
   const switchDestination = getProjectSwitcherDestination(pathname);
+  const displayProject = activeProject ?? activeProjectDisplay;
 
   return (
     <SidebarMenu>
@@ -40,20 +47,21 @@ export function ProjectSwitcher() {
             <SidebarMenuButton
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              disabled={isLoading && projects.length === 0}
             >
               <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                {activeProject ? (
-                  <span className="text-sm font-semibold">{activeProject.iconKey}</span>
+                {displayProject ? (
+                  <span className="text-sm font-semibold">{displayProject.iconKey}</span>
                 ) : (
                   <FolderKanbanIcon className="size-4" />
                 )}
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">
-                  {activeProject?.name ?? "Select project"}
+                  {displayProject?.name ?? (isLoading ? "Loading project" : "Select project")}
                 </span>
                 <span className="truncate text-xs">
-                  {activeProject?.description || "Project container"}
+                  {displayProject?.description || (isLoading ? "Loading workspace context" : "Project container")}
                 </span>
               </div>
               <ChevronsUpDown className="ml-auto" />
@@ -86,7 +94,7 @@ export function ProjectSwitcher() {
                     {project.description}
                   </div>
                 </div>
-                {activeProject?.id === project.id ? <CheckIcon className="size-4" /> : null}
+                {displayProject?.id === project.id ? <CheckIcon className="size-4" /> : null}
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />

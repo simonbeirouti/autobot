@@ -1,3 +1,5 @@
+import type { RunToolPreflight, ToolActionTarget, ToolTaskPlanItem, ToolkitReadinessItem } from "@/lib/tools/types";
+
 export const RUN_STATUSES = [
   "clarifying",
   "ready",
@@ -21,6 +23,46 @@ export type EventType = (typeof EVENT_TYPES)[number];
 export type UsageCategory = (typeof USAGE_CATEGORIES)[number];
 export type UsageStatus = (typeof USAGE_STATUSES)[number];
 export type ExecutionMode = "single_agent" | "multi_agent";
+export type RunActionRequiredKind =
+  | "tool_authentication"
+  | "tool_input"
+  | "manual_setup"
+  | "tool_confirmation"
+  | "manual_pause";
+
+export type RequiredToolInput = {
+  taskId: string | null;
+  taskTitle: string;
+  toolkitSlug: string;
+  field: string;
+  label: string;
+  prompt: string;
+  helpText: string;
+  placeholder: string;
+  value: string;
+};
+
+export type RunActionRequired = {
+  kind: RunActionRequiredKind;
+  title: string;
+  body: string;
+  reason: string;
+  blockingTaskTitle: string | null;
+  requiredToolkitSlugs: string[];
+  readiness: ToolkitReadinessItem[];
+  taskToolPlan: ToolTaskPlanItem[];
+  actionLabel: string | null;
+  actionHref: string | null;
+  actionTarget: ToolActionTarget | null;
+  resumeLabel: string | null;
+  canResume: boolean;
+  autoResume: boolean;
+  requiredToolInputs: RequiredToolInput[];
+  notifiedAt: string | null;
+  emailFallbackAt: string | null;
+  emailEscalatedAt: string | null;
+  resolvedAt: string | null;
+};
 
 export type TranscriptRole = "user" | "assistant";
 
@@ -36,6 +78,7 @@ export type ClarificationMessage = {
 export type RunRecord = {
   id: string;
   sessionId: string;
+  userId: string | null;
   projectId: string | null;
   objectiveId: string | null;
   objective: string;
@@ -43,6 +86,7 @@ export type RunRecord = {
   executionMode: ExecutionMode;
   readinessSummary: string | null;
   finalSummary: string | null;
+  actionRequired: RunActionRequired | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -58,6 +102,14 @@ export type RunTask = {
   position: number;
   agentId: string | null;
   agentLabel: string | null;
+  toolRequirement: "none" | "optional" | "required";
+  requiredToolkitSlugs: string[];
+  optionalToolkitSlugs: string[];
+  requiredToolIds: string[];
+  executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
+  toolSummary: string | null;
+  toolInput: Record<string, Record<string, unknown>>;
+  actionRequired: RunActionRequired | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -105,4 +157,5 @@ export type WorkspacePayload = {
   tasks: RunTask[];
   events: RunEvent[];
   usage: UsageRecord[];
+  toolPreflight: RunToolPreflight | null;
 };

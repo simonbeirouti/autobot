@@ -14,6 +14,22 @@ export const clarificationTaskSchema = z.object({
   title: z.string().min(3).max(140),
   description: z.string().max(300).optional().default(""),
   agentId: z.enum(agentIds).optional().default("orchestrator"),
+  requiredToolkitSlugs: z.array(z.string().min(1).max(80)).max(8).optional().default([]),
+  optionalToolkitSlugs: z.array(z.string().min(1).max(80)).max(8).optional().default([]),
+  requiredToolIds: z.array(z.string().min(1).max(120)).max(8).optional().default([]),
+  toolRequirement: z
+    .enum(["none", "optional", "required"])
+    .optional()
+    .default("none"),
+  executionStrategy: z
+    .enum(["manual_setup", "tool_execution", "analysis_only"])
+    .optional()
+    .default("analysis_only"),
+  toolSummary: z.string().max(240).optional().default(""),
+  toolInput: z
+    .record(z.string(), z.record(z.string(), z.unknown()))
+    .optional()
+    .default({}),
 });
 
 export const clarificationQuestionOptionSchema = z.object({

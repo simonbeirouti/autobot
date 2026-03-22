@@ -1,0 +1,44 @@
+"use client";
+
+import { useEffect } from "react";
+import { usePathname } from "next/navigation";
+
+import { RouteStateCard } from "@/components/route-state-card";
+import { Button } from "@/components/ui/button";
+import { DASHBOARD_HOME_ROUTE } from "@/lib/routes";
+
+function getProtectedFallbackHref(pathname: string) {
+  if (!pathname.startsWith("/dashboard")) {
+    return DASHBOARD_HOME_ROUTE;
+  }
+
+  const segments = pathname.split("/").filter(Boolean).slice(0, 2);
+  return `/${segments.join("/")}`;
+}
+
+export default function ProtectedError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  const pathname = usePathname();
+
+  useEffect(() => {
+    console.error(error);
+  }, [error]);
+
+  return (
+    <RouteStateCard
+      title="Workspace unavailable"
+      description="We could not load this part of your workspace. Try again, or return to the dashboard if the data is still unavailable."
+      primaryAction={{ href: getProtectedFallbackHref(pathname), label: "Back to section" }}
+      secondaryAction={
+        <Button onClick={reset} type="button" variant="outline">
+          Try again
+        </Button>
+      }
+    />
+  );
+}

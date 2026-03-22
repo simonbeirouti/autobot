@@ -17,6 +17,17 @@ import {
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import {
+  buildProjectToolPreflight,
+  resolveProjectToolPlanningTasks,
+} from "@/lib/tools/preflight";
+import {
+  applyAnsweredToolInputQuestions,
+  buildMissingToolInputQuestions,
+  withInferredToolInputs,
+} from "@/lib/tools/input-requirements";
+import { resolveProjectTools } from "@/lib/tools/resolver";
+import { resolveProjectToolRuntime } from "@/lib/tools/runtime";
 
 const bodySchema = z.object({
   draftId: z.string().uuid(),
@@ -147,6 +158,30 @@ export async function POST(request: Request) {
       sessionId: existing.draft.sessionId,
       userId: user.sub,
     });
+    const [projectTools, toolRuntime] =
+      existing.draft.projectId
+        ? await Promise.all([
+            resolveProjectTools(supabase, {
+              userId: user.sub,
+              projectId: existing.draft.projectId,
+            }),
+            resolveProjectToolRuntime(supabase, {
+              userId: user.sub,
+              projectId: existing.draft.projectId,
+              query: existing.draft.objective,
+            }),
+          ])
+        : [
+            {
+              selectedToolkitSlugs: [] as string[],
+              activeToolkitSlugs: [] as string[],
+              inactiveToolkitSlugs: [] as string[],
+              markdown: "Project tool context:\nSelected toolkits: none\nConnected and ready: none",
+            },
+            {
+              toolCandidates: [] as Array<{ title: string; toolkitSlug: string }>,
+            },
+          ];
 
     const result = await clarifyObjective({
       objective: existing.draft.objective,
@@ -157,6 +192,20 @@ export async function POST(request: Request) {
       clarificationRounds: transcript.filter(
         (message) => message.role === "assistant" && message.questions.length > 0,
       ).length,
+      planningContext: {
+        markdown: [
+          projectTools.markdown,
+          toolRuntime.toolCandidates.length > 0
+            ? `Likely helpful tools: ${toolRuntime.toolCandidates
+                .slice(0, 8)
+                .map((candidate) => `${candidate.title} [${candidate.toolkitSlug}]`)
+                .join(", ")}`
+            : "Likely helpful tools: none identified yet.",
+        ].join("\n"),
+        selectedToolkitSlugs: projectTools.selectedToolkitSlugs,
+        activeToolkitSlugs: projectTools.activeToolkitSlugs,
+        inactiveToolkitSlugs: projectTools.inactiveToolkitSlugs,
+      },
     });
 
     await appendClarificationMessage(supabase, {
@@ -167,8 +216,45 @@ export async function POST(request: Request) {
       questions: result.questions.map((question) => question.prompt),
     });
 
-    const isReviewReady = result.status === "ready_to_execute";
-    const nextQuestions = isReviewReady && result.questions.length === 0
+    const isPlannerReady = result.status === "ready_to_execute";
+    const taskDrafts =
+      isPlannerReady && existing.draft.projectId
+        ? (
+            await resolveProjectToolPlanningTasks(supabase, {
+              userId: user.sub,
+              projectId: existing.draft.projectId,
+              objective: existing.draft.objective,
+              tasks: result.tasks.map((task) => ({
+                title: task.title,
+                description: task.description,
+                toolRequirement: task.toolRequirement,
+                executionStrategy: task.executionStrategy,
+                toolSummary: task.toolSummary || null,
+                requiredToolkitSlugs: task.requiredToolkitSlugs,
+                optionalToolkitSlugs: task.optionalToolkitSlugs,
+              })),
+              discoverMissingToolkitRequirements: true,
+            })
+          ).map((task, index) => ({
+            ...result.tasks[index],
+            toolRequirement: task.toolRequirement,
+            executionStrategy: task.executionStrategy,
+            toolSummary: task.toolSummary ?? result.tasks[index]?.toolSummary ?? "",
+            requiredToolkitSlugs: task.requiredToolkitSlugs,
+            optionalToolkitSlugs: task.optionalToolkitSlugs,
+          }))
+        : result.tasks;
+    const taskDraftsWithInput = applyAnsweredToolInputQuestions({
+      tasks: withInferredToolInputs({
+        objective: existing.draft.objective,
+        tasks: taskDrafts,
+      }),
+      questions: updatedQuestions,
+    });
+    const missingToolInputQuestions =
+      isPlannerReady ? buildMissingToolInputQuestions({ tasks: taskDraftsWithInput }) : [];
+    const isReviewReady = isPlannerReady && missingToolInputQuestions.length === 0;
+    const nextQuestions = isPlannerReady && result.questions.length === 0
       ? updatedQuestions.map((question) => ({
           id: question.questionKey ?? question.id,
           prompt: question.question,
@@ -182,9 +268,13 @@ export async function POST(request: Request) {
           prefill: question.prefill,
         }))
       : result.questions;
+    const mergedQuestions = [
+      ...nextQuestions.filter((question) => !String(question.id).startsWith("tool_input:")),
+      ...missingToolInputQuestions,
+    ];
     const savedQuestions = await replaceIntakeQuestions(supabase, {
       draftId: payload.draftId,
-      questions: nextQuestions,
+      questions: mergedQuestions,
       existingQuestions: updatedQuestions,
     });
     const savedDraft = await updateIntakeDraft(supabase, {
@@ -192,18 +282,39 @@ export async function POST(request: Request) {
       userId: user.sub,
       patch: {
         status: isReviewReady ? "review_ready" : "collecting_input",
-        clarificationSummary: result.summary,
+        clarificationSummary:
+          missingToolInputQuestions.length > 0
+            ? `${result.summary}\n\nAutoBot still needs a few missing tool details before execution can start.`
+            : result.summary,
         executionMode: result.executionMode,
         confidenceToProceed: result.confidenceToProceed,
-        currentStep: Math.min(payload.currentStep ?? 0, Math.max(nextQuestions.length - 1, 0)),
-        questionCount: nextQuestions.length,
+        currentStep: Math.min(payload.currentStep ?? 0, Math.max(mergedQuestions.length - 1, 0)),
+        questionCount: mergedQuestions.length,
         generatedMarkdown: result.draftMarkdown || null,
         draftMarkdown: result.draftMarkdown || existing.draft.draftMarkdown,
-        taskDrafts: result.tasks,
+        taskDrafts: taskDraftsWithInput,
         eventNarrative: result.eventNarrative,
         lastGeneratedAt: isReviewReady ? new Date().toISOString() : existing.draft.lastGeneratedAt,
       },
     });
+    const toolPreflight =
+      isReviewReady && existing.draft.projectId
+        ? await buildProjectToolPreflight(supabase, {
+            userId: user.sub,
+            projectId: existing.draft.projectId,
+            objective: existing.draft.objective,
+            tasks: taskDrafts.map((task) => ({
+              title: task.title,
+              description: task.description,
+              toolRequirement: task.toolRequirement,
+              executionStrategy: task.executionStrategy,
+              toolSummary: task.toolSummary || null,
+              requiredToolkitSlugs: task.requiredToolkitSlugs,
+              optionalToolkitSlugs: task.optionalToolkitSlugs,
+            })),
+            nextPath: `/dashboard/drafts?draftId=${payload.draftId}`,
+          })
+        : null;
 
     await insertUsageRecords(supabase, user.sub, [
       {
@@ -224,6 +335,7 @@ export async function POST(request: Request) {
     const response: IntakeFlowResponse = {
       draft: savedDraft,
       questions: savedQuestions,
+      toolPreflight,
     };
 
     return NextResponse.json(response);

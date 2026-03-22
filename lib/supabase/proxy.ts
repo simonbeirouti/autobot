@@ -1,6 +1,21 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { buildAuthHref } from "@/components/auth/auth-route";
+import { DASHBOARD_HOME_ROUTE } from "@/lib/routes";
+
+function shouldRedirectAuthenticatedUserFromAuth(request: NextRequest) {
+  const { pathname, searchParams } = request.nextUrl;
+
+  if (pathname !== "/auth") {
+    return false;
+  }
+
+  const mode = searchParams.get("mode");
+
+  return mode === null || mode === "login" || mode === "sign-up";
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -40,6 +55,13 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
+  if (user && shouldRedirectAuthenticatedUserFromAuth(request)) {
+    const url = request.nextUrl.clone();
+    url.pathname = DASHBOARD_HOME_ROUTE;
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   if (
     request.nextUrl.pathname !== "/" &&
     !user &&
@@ -48,7 +70,7 @@ export async function updateSession(request: NextRequest) {
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone();
-    url.pathname = "/auth/login";
+    url.pathname = buildAuthHref("login");
     return NextResponse.redirect(url);
   }
 

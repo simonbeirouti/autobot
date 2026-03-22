@@ -1,10 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { fetchLongTermMemoryByProject } from "@/lib/memory/repository";
+import {
+  fetchProjectToolkitSelections,
+  fetchProviderConnections,
+} from "@/lib/tools/repository";
 import type {
   Objective,
   ObjectiveStatus,
   Project,
+  ProjectStatus,
   ProjectAsset,
   ProjectChatMessage,
   ProjectChatThread,
@@ -18,6 +23,9 @@ type ProjectRow = {
   name: string;
   description: string;
   icon_key: string;
+  status: ProjectStatus;
+  archived_at: string | null;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -78,6 +86,9 @@ function mapProject(row: ProjectRow): Project {
     name: row.name,
     description: row.description,
     iconKey: row.icon_key,
+    status: row.status,
+    archivedAt: row.archived_at,
+    deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -157,8 +168,9 @@ export async function createProject(
       name: params.name,
       description: params.description,
       icon_key: params.iconKey,
+      status: "active",
     })
-    .select("id, user_id, company_key, name, description, icon_key, created_at, updated_at")
+    .select("id, user_id, company_key, name, description, icon_key, status, archived_at, deleted_at, created_at, updated_at")
     .single();
 
   if (error) {
@@ -170,13 +182,22 @@ export async function createProject(
 
 export async function fetchProjects(
   supabase: SupabaseClient,
-  params: { userId: string },
+  params: {
+    userId: string;
+    statuses?: ProjectStatus[];
+  },
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from("projects")
-    .select("id, user_id, company_key, name, description, icon_key, created_at, updated_at")
+    .select("id, user_id, company_key, name, description, icon_key, status, archived_at, deleted_at, created_at, updated_at")
     .eq("user_id", params.userId)
     .order("updated_at", { ascending: false });
+
+  if (params.statuses?.length) {
+    query = query.in("status", params.statuses);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
@@ -191,9 +212,42 @@ export async function fetchProject(
 ) {
   const { data, error } = await supabase
     .from("projects")
-    .select("id, user_id, company_key, name, description, icon_key, created_at, updated_at")
+    .select("id, user_id, company_key, name, description, icon_key, status, archived_at, deleted_at, created_at, updated_at")
     .eq("id", params.projectId)
     .eq("user_id", params.userId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapProject(data as ProjectRow);
+}
+
+export async function updateProject(
+  supabase: SupabaseClient,
+  params: {
+    projectId: string;
+    userId: string;
+    patch: {
+      status?: ProjectStatus;
+      archivedAt?: string | null;
+      deletedAt?: string | null;
+    };
+  },
+) {
+  const patch: Record<string, unknown> = {};
+
+  if (params.patch.status !== undefined) patch.status = params.patch.status;
+  if (params.patch.archivedAt !== undefined) patch.archived_at = params.patch.archivedAt;
+  if (params.patch.deletedAt !== undefined) patch.deleted_at = params.patch.deletedAt;
+
+  const { data, error } = await supabase
+    .from("projects")
+    .update(patch)
+    .eq("id", params.projectId)
+    .eq("user_id", params.userId)
+    .select("id, user_id, company_key, name, description, icon_key, status, archived_at, deleted_at, created_at, updated_at")
     .single();
 
   if (error) {
@@ -327,6 +381,37 @@ export async function fetchProjectAssets(
   }
 
   return (data ?? []).map((row) => mapAsset(row as AssetRow));
+}
+
+export async function createProjectAsset(
+  supabase: SupabaseClient,
+  params: {
+    projectId: string;
+    userId: string;
+    label: string;
+    assetType: string;
+    storagePath?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("project_assets")
+    .insert({
+      project_id: params.projectId,
+      user_id: params.userId,
+      label: params.label,
+      asset_type: params.assetType,
+      storage_path: params.storagePath ?? null,
+      metadata: params.metadata ?? {},
+    })
+    .select("id, project_id, user_id, label, asset_type, storage_path, metadata, created_at, updated_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapAsset(data as AssetRow);
 }
 
 export async function createProjectChatThread(
@@ -507,7 +592,7 @@ export async function fetchProjectWorkspace(
     threadId?: string | null;
   },
 ): Promise<ProjectWorkspace> {
-  const [project, objectives, assets, threads, recentMemories] = await Promise.all([
+  const [project, objectives, assets, threads, recentMemories, toolkitSelections, providerConnections] = await Promise.all([
     fetchProject(supabase, { projectId: params.projectId, userId: params.userId }),
     fetchObjectives(supabase, { projectId: params.projectId, userId: params.userId }),
     fetchProjectAssets(supabase, { projectId: params.projectId, userId: params.userId }),
@@ -517,6 +602,11 @@ export async function fetchProjectWorkspace(
       projectId: params.projectId,
       limit: 8,
     }),
+    fetchProjectToolkitSelections(supabase, {
+      projectId: params.projectId,
+      userId: params.userId,
+    }),
+    fetchProviderConnections(supabase, { userId: params.userId }),
   ]);
 
   const activeThread = params.threadId
@@ -538,5 +628,7 @@ export async function fetchProjectWorkspace(
     activeThread,
     messages,
     recentMemories,
+    toolkitSelections,
+    providerConnections,
   };
 }

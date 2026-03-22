@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import type { MouseEvent } from "react";
 import { startTransition, useDeferredValue, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Clock3Icon, FileTextIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, Clock3Icon, FileTextIcon, PanelLeftIcon, Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
 
 import { MarkdownPreview } from "@/components/markdown-preview";
 import { useProject } from "@/components/providers/project-provider";
+import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
 import {
   WorkspaceSidebarPanel,
   WorkspaceSidebarSkeleton,
@@ -24,6 +27,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer";
 import {
   Empty,
   EmptyDescription,
@@ -47,17 +58,24 @@ import {
   createOptimisticFlow,
   dashboardQueryKeys,
   dashboardQueryTimings,
+  fetchDraftPreflight,
   fetchJson,
   getDraftsUpdatedAt,
   upsertDraftInList,
 } from "@/lib/query/dashboard";
+import { isNotFoundError } from "@/lib/query/http-error";
 import { useDelayedVisibility } from "@/lib/query/use-delayed-visibility";
 import type { IntakeDraft, IntakeFlowResponse, IntakeQuestion } from "@/lib/intake/types";
+import type { RunToolPreflight } from "@/lib/tools/types";
 import { cn } from "@/lib/utils";
 
-type DraftWorkspaceMode = "questions" | "review";
+type DraftWorkspaceMode = "questions" | "tools" | "review";
 type QuestionResponse = IntakeQuestion["response"];
+type ExecuteDraftError = Error & { toolPreflight?: RunToolPreflight | null };
 const ERROR_VISIBILITY_DELAY_MS = 1000;
+const OBJECTIVE_START_SUCCESS_STORAGE_KEY = "autobot-objective-intake-started";
+const DRAFT_SUMMARY_FALLBACK =
+  "Answer the next decisions so AutoBot can generate the draft plan.";
 
 function getTimestamp(value: string | null | undefined) {
   if (!value) {
@@ -161,24 +179,60 @@ function haveAnswersChanged(
   );
 }
 
-function buildDraftHref(pathname: string, draftId: string) {
-  const params = new URLSearchParams();
-  params.set("draftId", draftId);
-  return `${pathname}?${params.toString()}`;
+function buildDraftSearchHref(
+  pathname: string,
+  searchParams: Pick<URLSearchParams, "toString">,
+  params: { draftId?: string | null },
+) {
+  const nextParams = new URLSearchParams(searchParams.toString());
+
+  if (params.draftId) {
+    nextParams.set("draftId", params.draftId);
+  } else {
+    nextParams.delete("draftId");
+  }
+
+  const query = nextParams.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }
 
-async function fetchDrafts(projectId: string) {
-  return fetchJson<IntakeDraft[]>(`/api/intake/drafts?projectId=${projectId}`);
+function getDraftWorkspaceMode(
+  flow: IntakeFlowResponse,
+  toolPreflight: RunToolPreflight | null | undefined,
+): DraftWorkspaceMode {
+  const canReviewDraft =
+    flow.draft.status === "review_ready" ||
+    Boolean(flow.draft.generatedMarkdown ?? flow.draft.draftMarkdown);
+
+  if (!canReviewDraft) {
+    return "questions";
+  }
+
+  return toolPreflight?.launchState === "blocked" ? "tools" : "review";
 }
 
-async function fetchDraftFlow(draftId: string) {
-  return fetchJson<IntakeFlowResponse>(`/api/intake/drafts/${draftId}`);
+async function fetchDrafts(projectId: string, signal?: AbortSignal) {
+  return fetchJson<IntakeDraft[]>(`/api/intake/drafts?projectId=${projectId}`, {
+    signal,
+  });
+}
+
+async function fetchDraftFlow(draftId: string, signal?: AbortSignal) {
+  return fetchJson<IntakeFlowResponse>(`/api/intake/drafts/${draftId}`, {
+    signal,
+  });
+}
+
+async function deleteDraft(draftId: string) {
+  return fetchJson<{ success: true; draftId: string }>(`/api/intake/drafts/${draftId}`, {
+    method: "DELETE",
+  });
 }
 
 function DraftWorkspaceSkeleton() {
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_minmax(0,1fr)] xl:overflow-hidden">
-      <Card className="overflow-hidden border-none">
+      <Card className="hidden overflow-hidden border-none xl:block">
         <CardHeader className="-mt-2 space-y-3">
           <Skeleton className="h-8 w-1/2" />
           <Skeleton className="h-4 w-full" />
@@ -219,6 +273,159 @@ function DraftWorkspaceSkeleton() {
   );
 }
 
+function getDraftWorkspaceSummary(draft: Pick<IntakeDraft, "clarificationSummary">) {
+  return draft.clarificationSummary ?? DRAFT_SUMMARY_FALLBACK;
+}
+
+function getToolkitReadinessMeta(status: RunToolPreflight["readiness"][number]["status"]) {
+  switch (status) {
+    case "ready":
+      return {
+        badgeVariant: "default" as const,
+        label: "Connected",
+      };
+    case "auth_in_progress":
+      return {
+        badgeVariant: "secondary" as const,
+        label: "Auth in progress",
+      };
+    case "missing_session":
+      return {
+        badgeVariant: "outline" as const,
+        label: "Needs setup",
+      };
+    case "confirmation_required":
+      return {
+        badgeVariant: "outline" as const,
+        label: "Needs confirmation",
+      };
+    case "not_connected":
+    case "not_selected":
+    default:
+      return {
+        badgeVariant: "outline" as const,
+        label: "Not connected",
+      };
+  }
+}
+
+function getTaskConnectionMeta(
+  task: RunToolPreflight["taskToolPlan"][number],
+  readinessByToolkit: Map<string, RunToolPreflight["readiness"][number]>,
+) {
+  if (task.requiredToolkitSlugs.length === 0) {
+    return {
+      badgeVariant: "secondary" as const,
+      label: "No apps needed",
+    };
+  }
+
+  const readinessItems = task.requiredToolkitSlugs
+    .map((toolkitSlug) => readinessByToolkit.get(toolkitSlug))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const connectedCount = readinessItems.filter((item) => item.status === "ready").length;
+
+  if (connectedCount === readinessItems.length && readinessItems.length > 0) {
+    return {
+      badgeVariant: "default" as const,
+      label: "Ready",
+    };
+  }
+
+  if (connectedCount > 0) {
+    return {
+      badgeVariant: "secondary" as const,
+      label: `${connectedCount}/${readinessItems.length} connected`,
+    };
+  }
+
+  return {
+    badgeVariant: "outline" as const,
+    label:
+      task.requiredToolkitSlugs.length > 1
+        ? "App options need setup"
+        : "Needs setup",
+  };
+}
+
+function DraftListItem({
+  draft,
+  isActive,
+  isConfirmingDelete,
+  isDeletePending,
+  onSelect,
+  onDelete,
+}: {
+  draft: IntakeDraft;
+  isActive: boolean;
+  isConfirmingDelete: boolean;
+  isDeletePending: boolean;
+  onSelect: () => void;
+  onDelete: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "border border-border",
+        isActive && "border-primary bg-muted",
+      )}
+    >
+      <div className="flex items-start gap-2 p-4">
+        <button
+          className="min-w-0 flex-1 space-y-4 text-left"
+          onClick={onSelect}
+          type="button"
+        >
+          <div className="space-y-2">
+            <h2 className="text-sm font-medium" title={draft.objective}>
+              {truncateDraftObjective(draft.objective)}
+            </h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={isActive ? "default" : "secondary"}>
+              {getDraftStatusLabel(draft)}
+            </Badge>
+            {draft.executionMode ? (
+              <Badge variant="outline">{draft.executionMode.replace("_", " ")}</Badge>
+            ) : null}
+          </div>
+          <Separator />
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Clock3Icon className="size-3.5" />
+            <span>
+              Created {formatDistanceToNowStrict(new Date(draft.createdAt))} ago
+            </span>
+          </div>
+        </button>
+
+        <Button
+          aria-label={
+            isConfirmingDelete
+              ? `Confirm delete ${draft.objective}`
+              : `Delete ${draft.objective}`
+          }
+          className={cn(
+            "shrink-0",
+            isConfirmingDelete &&
+              "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive",
+          )}
+          disabled={isDeletePending}
+          onClick={onDelete}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          {isConfirmingDelete ? (
+            <CheckIcon className="size-4" />
+          ) : (
+            <Trash2Icon className="size-4" />
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function DraftWorkspaceView({
   flow,
   answers,
@@ -239,6 +446,7 @@ function DraftWorkspaceView({
   onToggleReviewEditing,
   onSaveDraft,
   onStartExecution,
+  toolPreflight,
 }: {
   flow: IntakeFlowResponse;
   answers: Record<string, QuestionResponse>;
@@ -259,6 +467,7 @@ function DraftWorkspaceView({
   onToggleReviewEditing: () => void;
   onSaveDraft: () => void;
   onStartExecution: () => void;
+  toolPreflight: RunToolPreflight | null;
 }) {
   const activeQuestions = flow.questions;
   const answeredQuestionCount = activeQuestions.filter((question) =>
@@ -271,11 +480,16 @@ function DraftWorkspaceView({
     flow.draft.status === "review_ready" ||
     Boolean(flow.draft.generatedMarkdown ?? flow.draft.draftMarkdown);
   const canStartExecution = flow.draft.status === "review_ready" || Boolean(flow.draft.runId);
+  const launchBlocked = toolPreflight?.launchState === "blocked";
+  const requiresToolReview = launchBlocked;
   const questionAnswersChanged = haveAnswersChanged(generatedAnswers, answers);
+  const readinessByToolkit = new Map(
+    (toolPreflight?.readiness ?? []).map((item) => [item.toolkitSlug, item]),
+  );
 
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_minmax(0,1fr)] xl:overflow-hidden">
-      <Card className="overflow-hidden border-none">
+      <Card className="hidden overflow-hidden border-none xl:block">
         <CardHeader className="-mt-2">
           <div className="flex flex-col gap-4">
             <div className="min-w-0 space-y-3">
@@ -283,8 +497,7 @@ function DraftWorkspaceView({
                 {flow.draft.objective}
               </CardTitle>
               <p className="max-w-5xl text-sm text-muted-foreground">
-                {flow.draft.clarificationSummary ??
-                  "Answer the next decisions so AutoBot can generate the draft plan."}
+                {getDraftWorkspaceSummary(flow.draft)}
               </p>
               <div className="flex flex-wrap gap-2">
                 <Badge variant={flow.draft.status === "review_ready" ? "default" : "outline"}>
@@ -335,6 +548,29 @@ function DraftWorkspaceView({
             </button>
 
             {canReviewDraft ? (
+              requiresToolReview ? (
+                <button
+                  className={cn(
+                    "w-full space-y-3 border p-4 text-left text-sm transition-colors",
+                    mode === "tools" ? "border-primary bg-muted" : "hover:bg-muted/50",
+                  )}
+                  onClick={() => onToggleMode("tools")}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">Required apps</span>
+                    <Badge variant={launchBlocked ? "outline" : "default"}>
+                      {launchBlocked ? "Needs setup" : "Ready"}
+                    </Badge>
+                  </div>
+                  <p className="text-muted-foreground">
+                    Review the required apps and connect anything missing before moving to draft markdown.
+                  </p>
+                </button>
+              ) : null
+            ) : null}
+
+            {canReviewDraft ? (
               <button
                 className={cn(
                   "w-full space-y-3 border p-4 text-left text-sm transition-colors",
@@ -359,9 +595,15 @@ function DraftWorkspaceView({
                     <Link href={`/dashboard/runs?runId=${flow.draft.runId}`}>Open linked run</Link>
                   </Button>
                 ) : (
-                  <Button className="w-full" disabled={isExecuting} onClick={onStartExecution}>
-                    {isExecuting ? "Starting..." : "Start execution"}
-                  </Button>
+                  <div className="space-y-2">
+                    <Button
+                      className="w-full"
+                      disabled={isExecuting || launchBlocked}
+                      onClick={onStartExecution}
+                    >
+                      {isExecuting ? "Starting..." : "Start execution"}
+                    </Button>
+                  </div>
                 )
               : null}
           </CardContent>
@@ -382,8 +624,8 @@ function DraftWorkspaceView({
                 Capture the context the agent needs before generating or regenerating the draft.
               </CardDescription>
             </CardHeader>
-            <CardContent className="min-h-0 flex-1 overflow-hidden pb-0">
-              <div className="h-full overflow-y-auto pb-5">
+            <CardContent className="flex-1 pb-0 xl:min-h-0 xl:overflow-hidden">
+              <div className="pb-5 xl:h-full xl:overflow-y-auto">
               {activeQuestions.length > 0 ? (
                 <div className="space-y-5">
                   {activeQuestions.map((question, index) => (
@@ -577,6 +819,106 @@ function DraftWorkspaceView({
               ) : null}
             </CardFooter>
           </Card>
+        ) : mode === "tools" ? (
+          <Card className="flex min-h-[320px] flex-col xl:h-full xl:min-h-0">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <CardTitle className="text-base">Required apps</CardTitle>
+                <Badge variant={launchBlocked ? "outline" : "default"}>
+                  {launchBlocked ? "Launch blocked" : "Ready"}
+                </Badge>
+              </div>
+              <CardDescription>
+                Connect any missing apps before continuing to the generated draft.
+              </CardDescription>
+              {toolPreflight?.toolkits.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {toolPreflight.toolkits.map((toolkit) => {
+                    const readinessMeta = getToolkitReadinessMeta(toolkit.readiness.status);
+
+                    return (
+                      <Badge key={toolkit.slug} variant={readinessMeta.badgeVariant}>
+                        {toolkit.title}: {readinessMeta.label}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </CardHeader>
+            <CardContent className="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+              {toolPreflight && toolPreflight.taskToolPlan.length > 0 ? (
+                <div className="space-y-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1">
+                  {toolPreflight.taskToolPlan.map((task, index) => {
+                    const taskConnectionMeta = getTaskConnectionMeta(task, readinessByToolkit);
+
+                    return (
+                      <div
+                        className="space-y-4 border p-4"
+                        key={`${task.title}-${index}`}
+                      >
+                        <div className="flex min-w-0 items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <p className="text-sm font-medium">{task.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {task.requiredToolkitSlugs.length > 1
+                                ? "Review the app options for this step."
+                                : task.requiredToolkitSlugs.length === 1
+                                  ? "Review the app needed for this step."
+                                  : "No additional app connection is required for this step."}
+                            </p>
+                          </div>
+                          <Badge className="shrink-0" variant={taskConnectionMeta.badgeVariant}>
+                            {taskConnectionMeta.label}
+                          </Badge>
+                        </div>
+
+                        <div className="space-y-2 text-sm">
+                          {task.toolSummary ? (
+                            <p className="text-muted-foreground">{task.toolSummary}</p>
+                          ) : null}
+                          {task.requiredToolkitSlugs.length > 1 ? (
+                            <p className="text-muted-foreground">
+                              More than one app may work for this step. Connect the best fit for your workflow.
+                            </p>
+                          ) : null}
+                          {task.requiredToolkitSlugs.length > 0 ? (
+                            <ToolConnectionChecklist
+                              nextPath={`/dashboard/drafts?draftId=${flow.draft.id}`}
+                              readiness={toolPreflight.readiness}
+                              requiredToolkitSlugs={task.requiredToolkitSlugs}
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="space-y-4">
+                    {!launchBlocked ? (
+                      <div className="border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-muted-foreground">
+                        No missing app connections. You can continue to the draft markdown.
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border p-4 text-sm text-muted-foreground">
+                  No apps are required for this objective. You can continue to the draft markdown.
+                </div>
+              )}
+            </CardContent>
+            <CardFooter className="justify-between gap-3">
+              <Button onClick={() => onToggleMode("questions")} variant="outline">
+                Back to questions
+              </Button>
+              <Button
+                disabled={launchBlocked}
+                onClick={() => onToggleMode("review")}
+              >
+                Continue to draft
+              </Button>
+            </CardFooter>
+          </Card>
         ) : (
           <Card className="flex min-h-[320px] flex-col xl:h-full xl:min-h-0">
             <CardHeader>
@@ -585,7 +927,7 @@ function DraftWorkspaceView({
                 Edit the markdown directly or return to clarification to regenerate the draft.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col space-y-4">
+            <CardContent className="flex flex-1 flex-col space-y-4 xl:min-h-0">
               <div className="flex flex-wrap gap-2">
                 <Button onClick={onToggleReviewEditing} variant="outline">
                   {isEditingReview ? "Preview markdown" : "Edit markdown"}
@@ -599,12 +941,12 @@ function DraftWorkspaceView({
 
               {isEditingReview ? (
                 <Textarea
-                  className="min-h-0 flex-1 font-mono text-sm"
+                  className="min-h-[320px] font-mono text-sm xl:min-h-0 xl:flex-1"
                   onChange={(event) => onReviewMarkdownChange(event.target.value)}
                   value={reviewMarkdown}
                 />
               ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto border p-4">
+                <div className="border p-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
                   <MarkdownPreview className="space-y-1" content={reviewMarkdown} />
                 </div>
               )}
@@ -625,7 +967,7 @@ function DraftWorkspaceView({
               )}
               {canStartExecution ? (
                 <Button
-                  disabled={flow.draft.status !== "review_ready" || isExecuting}
+                  disabled={flow.draft.status !== "review_ready" || isExecuting || launchBlocked}
                   onClick={onStartExecution}
                 >
                   {isExecuting ? "Starting..." : "Start execution"}
@@ -670,8 +1012,10 @@ export function DraftsDashboardClient({
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const isRestoring = useIsRestoring();
-  const { activeProject, activeProjectId } = useProject();
+  const { activeProject, activeProjectId, setActiveProjectId } = useProject();
   const requestedDraftId = searchParams.get("draftId");
+  const [confirmDeleteDraftId, setConfirmDeleteDraftId] = useState<string | null>(null);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
   const [answers, setAnswers] = useState<Record<string, QuestionResponse>>({});
   const [generatedAnswers, setGeneratedAnswers] = useState<Record<string, QuestionResponse>>({});
@@ -687,7 +1031,7 @@ export function DraftsDashboardClient({
     queryKey: activeProjectId
       ? dashboardQueryKeys.drafts.all(activeProjectId)
       : dashboardQueryKeys.drafts.all("pending"),
-    queryFn: () => fetchDrafts(activeProjectId!),
+    queryFn: ({ signal }) => fetchDrafts(activeProjectId!, signal),
     ...(initialDrafts && activeProjectId
       ? {
           initialData: initialDrafts,
@@ -705,11 +1049,27 @@ export function DraftsDashboardClient({
     hasDraftsLoadError,
     ERROR_VISIBILITY_DELAY_MS,
   );
-  const selectedDraftId =
-    requestedDraftId && drafts.some((draft) => draft.id === requestedDraftId)
+  const hasRequestedDraft = requestedDraftId
+    ? drafts.some((draft) => draft.id === requestedDraftId)
+    : false;
+  const selectedDraftId = requestedDraftId
+    ? hasRequestedDraft
       ? requestedDraftId
-      : initialSelectedDraftId ?? drafts[0]?.id ?? null;
+      : null
+    : initialSelectedDraftId ?? drafts[0]?.id ?? null;
   const deferredDraftId = useDeferredValue(selectedDraftId);
+
+  useEffect(() => {
+    if (!confirmDeleteDraftId) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setConfirmDeleteDraftId((current) => (current === confirmDeleteDraftId ? null : current));
+    }, 2200);
+
+    return () => window.clearTimeout(timeout);
+  }, [confirmDeleteDraftId]);
 
   useEffect(() => {
     if (!activeProjectId) {
@@ -721,15 +1081,20 @@ export function DraftsDashboardClient({
     }
 
     startTransition(() => {
-      router.replace(buildDraftHref(pathname, selectedDraftId), { scroll: false });
+      router.replace(
+        buildDraftSearchHref(pathname, searchParams, {
+          draftId: selectedDraftId,
+        }),
+        { scroll: false },
+      );
     });
-  }, [activeProjectId, drafts.length, pathname, requestedDraftId, router, selectedDraftId]);
+  }, [activeProjectId, drafts.length, pathname, requestedDraftId, router, searchParams, selectedDraftId]);
 
   const flowQuery = useQuery({
     queryKey: deferredDraftId
       ? dashboardQueryKeys.drafts.flow(deferredDraftId)
       : dashboardQueryKeys.drafts.flow("pending"),
-    queryFn: () => fetchDraftFlow(deferredDraftId!),
+    queryFn: ({ signal }) => fetchDraftFlow(deferredDraftId!, signal),
     enabled: Boolean(deferredDraftId),
     initialData:
       initialFlow && initialFlow.draft.id === deferredDraftId ? initialFlow : undefined,
@@ -739,6 +1104,16 @@ export function DraftsDashboardClient({
         : undefined,
     staleTime: dashboardQueryTimings.draftFlow.staleTime,
   });
+  const preflightQuery = useQuery({
+    queryKey: deferredDraftId
+      ? dashboardQueryKeys.drafts.preflight(deferredDraftId)
+      : dashboardQueryKeys.drafts.preflight("pending"),
+    queryFn: () => fetchDraftPreflight(deferredDraftId!),
+    enabled: Boolean(deferredDraftId),
+    initialData:
+      initialFlow?.draft.id === deferredDraftId ? initialFlow.toolPreflight ?? null : undefined,
+    staleTime: dashboardQueryTimings.draftFlow.staleTime,
+  });
   const showFlowError = useDelayedVisibility(
     Boolean(flowQuery.error) && !flowQuery.isLoading && !flowQuery.isFetching,
     ERROR_VISIBILITY_DELAY_MS,
@@ -746,6 +1121,110 @@ export function DraftsDashboardClient({
   const isFlowTransitioning = Boolean(selectedDraftId) && deferredDraftId !== selectedDraftId;
   const isFlowLoading =
     isFlowTransitioning || flowQuery.isLoading || (flowQuery.isFetching && !flowQuery.data);
+  const selectedDraft = selectedDraftId
+    ? drafts.find((draft) => draft.id === selectedDraftId) ?? null
+    : null;
+  const selectedDraftSummary =
+    flowQuery.data?.draft.id === selectedDraftId
+      ? getDraftWorkspaceSummary(flowQuery.data.draft)
+      : selectedDraft
+        ? getDraftWorkspaceSummary(selectedDraft)
+        : null;
+  const toolPreflight =
+    preflightQuery.data ??
+    (flowQuery.data?.draft.id === selectedDraftId ? flowQuery.data.toolPreflight ?? null : null);
+
+  if (draftsQuery.error && !draftsQuery.isLoading && !draftsQuery.isFetching && !draftsQuery.data) {
+    throw draftsQuery.error;
+  }
+
+  const isMissingRequestedDraft =
+    Boolean(
+      requestedDraftId &&
+      activeProject &&
+      !draftsQuery.isLoading &&
+      !draftsQuery.isFetching &&
+      !draftsQuery.error &&
+      !hasRequestedDraft,
+    ) ||
+    Boolean(
+      selectedDraftId &&
+      flowQuery.error &&
+      !flowQuery.isLoading &&
+      !flowQuery.isFetching &&
+      !flowQuery.data &&
+      isNotFoundError(flowQuery.error),
+    );
+
+  if (
+    flowQuery.error &&
+    !flowQuery.isLoading &&
+    !flowQuery.isFetching &&
+    !flowQuery.data &&
+    !isNotFoundError(flowQuery.error)
+  ) {
+    throw flowQuery.error;
+  }
+
+  if (
+    preflightQuery.error &&
+    !preflightQuery.isLoading &&
+    !preflightQuery.isFetching &&
+    preflightQuery.data === undefined
+  ) {
+    throw preflightQuery.error;
+  }
+
+  const handleSelectDraft = (draftId: string) => {
+    startTransition(() => {
+      router.replace(
+        buildDraftSearchHref(pathname, searchParams, {
+          draftId,
+        }),
+        { scroll: false },
+      );
+    });
+    setIsMobileDrawerOpen(false);
+  };
+
+  const handleDeleteDraft = (draftId: string, event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (confirmDeleteDraftId === draftId) {
+      deleteDraftMutation.mutate(draftId);
+      return;
+    }
+
+    setConfirmDeleteDraftId(draftId);
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const pendingToast = window.sessionStorage.getItem(OBJECTIVE_START_SUCCESS_STORAGE_KEY);
+    if (!pendingToast) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(pendingToast) as {
+        draftId?: string;
+        toastId?: string;
+      };
+
+      if (!parsed.draftId || parsed.draftId !== selectedDraftId) {
+        return;
+      }
+
+      toast.success("Objective intake started.", {
+        id: parsed.toastId ?? undefined,
+      });
+      window.sessionStorage.removeItem(OBJECTIVE_START_SUCCESS_STORAGE_KEY);
+    } catch {
+      window.sessionStorage.removeItem(OBJECTIVE_START_SUCCESS_STORAGE_KEY);
+    }
+  }, [selectedDraftId]);
 
   useEffect(() => {
     if (!flowQuery.data) {
@@ -764,11 +1243,35 @@ export function DraftsDashboardClient({
     setReviewMarkdown(nextFlow.draft.draftMarkdown ?? nextFlow.draft.generatedMarkdown ?? "");
     setIsEditingReview(false);
     if (isDraftSelectionChange) {
-      setMode(nextFlow.draft.status === "review_ready" ? "review" : "questions");
+      setMode(getDraftWorkspaceMode(nextFlow, nextFlow.toolPreflight ?? preflightQuery.data));
     }
     previousDraftIdRef.current = nextFlow.draft.id;
     setError(null);
-  }, [flowQuery.data]);
+  }, [flowQuery.data, preflightQuery.data]);
+
+  useEffect(() => {
+    if (!flowQuery.data) {
+      return;
+    }
+
+    const nextMode = getDraftWorkspaceMode(flowQuery.data, toolPreflight);
+
+    setMode((currentMode) => {
+      if (currentMode === "questions") {
+        return currentMode;
+      }
+
+      if (currentMode === "tools" && nextMode === "review") {
+        return "review";
+      }
+
+      if (currentMode === "review" && nextMode === "tools") {
+        return "tools";
+      }
+
+      return currentMode;
+    });
+  }, [flowQuery.data, toolPreflight]);
 
   useEffect(() => {
     if (!flowQuery.data?.draft.runId || flowQuery.data.draft.status !== "executing") {
@@ -782,6 +1285,10 @@ export function DraftsDashboardClient({
 
   function syncFlow(flow: IntakeFlowResponse) {
     queryClient.setQueryData(dashboardQueryKeys.drafts.flow(flow.draft.id), flow);
+    queryClient.setQueryData(
+      dashboardQueryKeys.drafts.preflight(flow.draft.id),
+      flow.toolPreflight ?? null,
+    );
     if (!activeProjectId) {
       return;
     }
@@ -828,13 +1335,23 @@ export function DraftsDashboardClient({
     onSuccess: (flow) => {
       syncFlow(flow);
       setGeneratedAnswers(normalizeAnswers(flow.questions));
-      setMode(flow.draft.status === "review_ready" ? "review" : "questions");
+      setMode(getDraftWorkspaceMode(flow, flow.toolPreflight));
+      toast.success(
+        flow.draft.status === "review_ready"
+          ? "Clarification complete. Review draft ready."
+          : "Clarification answers saved.",
+      );
     },
     onError: (submissionError, flow, context) => {
       if (context?.previousFlow) {
         syncFlow(context.previousFlow);
       }
 
+      toast.error(
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Unable to continue clarification.",
+      );
       setError(
         submissionError instanceof Error
           ? submissionError.message
@@ -873,22 +1390,40 @@ export function DraftsDashboardClient({
     onSuccess: (flow) => {
       syncFlow(flow);
       setIsEditingReview(false);
+      toast.success("Draft saved.");
     },
     onError: (saveError, flow, context) => {
       if (context?.previousFlow) {
         syncFlow(context.previousFlow);
       }
 
+      toast.error(saveError instanceof Error ? saveError.message : "Unable to save draft.");
       setError(saveError instanceof Error ? saveError.message : "Unable to save draft.");
     },
   });
 
   const startExecution = useMutation({
-    mutationFn: async (flow: IntakeFlowResponse) =>
-      fetchJson<{ runId: string }>(`/api/intake/drafts/${flow.draft.id}/execute`, {
+    mutationFn: async (flow: IntakeFlowResponse) => {
+      const response = await fetch(`/api/intake/drafts/${flow.draft.id}/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-      }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        const error = new Error(
+          payload?.error ?? "Unable to start execution.",
+        ) as ExecuteDraftError;
+        error.toolPreflight = payload?.toolPreflight ?? null;
+        throw error;
+      }
+
+      return payload as {
+        runId: string;
+        runStatus?: "ready" | "blocked" | "running" | "completed" | "failed" | "clarifying";
+        actionRequired?: unknown;
+      };
+    },
     onMutate: async (flow) => {
       setError(null);
       await queryClient.cancelQueries({ queryKey: dashboardQueryKeys.drafts.flow(flow.draft.id) });
@@ -909,32 +1444,143 @@ export function DraftsDashboardClient({
       return { previousFlow };
     },
     onSuccess: async (payload, flow) => {
+      if (flow.draft.projectId) {
+        setActiveProjectId(flow.draft.projectId);
+      }
       queryClient.setQueryData<IntakeDraft[] | undefined>(
-        dashboardQueryKeys.drafts.all(activeProjectId ?? "pending"),
+        dashboardQueryKeys.drafts.all(flow.draft.projectId ?? activeProjectId ?? "pending"),
         (currentDrafts) => currentDrafts?.filter((draft) => draft.id !== flow.draft.id),
       );
+      if (payload.runStatus === "blocked" || payload.actionRequired) {
+        await queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.notifications.all,
+        });
+      }
       if (activeProjectId) {
         await queryClient.invalidateQueries({
           queryKey: dashboardQueryKeys.runs.all(activeProjectId),
         });
       }
+      toast.success("Execution started.");
       startTransition(() => {
         router.push(`/dashboard/runs?runId=${payload.runId}`);
       });
     },
     onError: (executeError, flow, context) => {
-      if (context?.previousFlow) {
+      const preflight =
+        executeError instanceof Error && "toolPreflight" in executeError
+          ? (executeError as ExecuteDraftError).toolPreflight
+          : null;
+
+      if (preflight) {
+        syncFlow({
+          ...flow,
+          toolPreflight: preflight,
+        });
+        setMode("tools");
+      } else if (context?.previousFlow) {
         syncFlow(context.previousFlow);
       }
 
+      toast.error(
+        executeError instanceof Error ? executeError.message : "Unable to start execution.",
+      );
       setError(
         executeError instanceof Error ? executeError.message : "Unable to start execution.",
       );
     },
   });
+  const deleteDraftMutation = useMutation({
+    mutationFn: (draftId: string) => deleteDraft(draftId),
+    onSuccess: async ({ draftId }) => {
+      const currentDrafts =
+        queryClient.getQueryData<IntakeDraft[]>(
+          activeProjectId
+            ? dashboardQueryKeys.drafts.all(activeProjectId)
+            : dashboardQueryKeys.drafts.all("pending"),
+        ) ?? [];
+      const nextDrafts = currentDrafts.filter((draft) => draft.id !== draftId);
+
+      if (activeProjectId) {
+        queryClient.setQueryData(dashboardQueryKeys.drafts.all(activeProjectId), nextDrafts);
+      }
+      await queryClient.cancelQueries({
+        queryKey: dashboardQueryKeys.drafts.flow(draftId),
+        exact: true,
+      });
+      await queryClient.cancelQueries({
+        queryKey: dashboardQueryKeys.drafts.preflight(draftId),
+        exact: true,
+      });
+      queryClient.removeQueries({
+        queryKey: dashboardQueryKeys.drafts.flow(draftId),
+        exact: true,
+      });
+      queryClient.removeQueries({
+        queryKey: dashboardQueryKeys.drafts.preflight(draftId),
+        exact: true,
+      });
+      setConfirmDeleteDraftId(null);
+
+      if (selectedDraftId === draftId) {
+        startTransition(() => {
+          router.replace(pathname, { scroll: false });
+        });
+      }
+
+      toast.success("Draft deleted.");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Unable to delete draft.");
+    },
+  });
 
   return (
-    <WorkspaceSplitLayout
+    <>
+      <WorkspaceSplitLayout
+      mobileDescription={selectedDraftSummary}
+      mobileSelector={
+        activeProject ? (
+          <Drawer onOpenChange={setIsMobileDrawerOpen} open={isMobileDrawerOpen}>
+            <DrawerTrigger asChild>
+              <Button className="w-full justify-between" type="button" variant="outline">
+                <span className="flex items-center gap-2">
+                  <PanelLeftIcon className="size-4" />
+                  {selectedDraft ? "Browse drafts" : "Select a draft"}
+                </span>
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {drafts.length}
+                  <ChevronDownIcon className="size-4" />
+                </span>
+              </Button>
+            </DrawerTrigger>
+            <DrawerContent>
+              <DrawerHeader className="text-left">
+                <DrawerTitle>Drafts</DrawerTitle>
+                <DrawerDescription>
+                  Open an in-progress draft to continue clarification, review the plan, or launch execution.
+                </DrawerDescription>
+              </DrawerHeader>
+              <div className="overflow-y-auto px-4 pb-4">
+                <div className="space-y-2">
+                  {drafts.map((draft) => (
+                    <DraftListItem
+                      draft={draft}
+                      isActive={draft.id === selectedDraftId}
+                      isConfirmingDelete={confirmDeleteDraftId === draft.id}
+                      isDeletePending={deleteDraftMutation.isPending}
+                      key={draft.id}
+                      onDelete={(event) => handleDeleteDraft(draft.id, event)}
+                      onSelect={() => handleSelectDraft(draft.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </DrawerContent>
+          </Drawer>
+        ) : null
+      }
+      mobileTitle={selectedDraft?.objective ?? null}
       sidebar={
         <WorkspaceSidebarPanel
           description="Open an in-progress draft to continue clarification, review the plan, or launch execution."
@@ -978,45 +1624,16 @@ export function DraftsDashboardClient({
 
           <div className="space-y-2">
             {drafts.map((draft) => {
-              const isActive = draft.id === selectedDraftId;
-
               return (
-                <Button
-                  className={cn(
-                    "h-auto w-full items-start justify-start border border-border p-0 text-left whitespace-normal",
-                    isActive && "border-primary bg-muted",
-                  )}
+                <DraftListItem
+                  draft={draft}
+                  isActive={draft.id === selectedDraftId}
+                  isConfirmingDelete={confirmDeleteDraftId === draft.id}
+                  isDeletePending={deleteDraftMutation.isPending}
                   key={draft.id}
-                  onClick={() => {
-                    startTransition(() => {
-                      router.replace(buildDraftHref(pathname, draft.id), { scroll: false });
-                    });
-                  }}
-                  variant="ghost"
-                >
-                  <div className="w-full space-y-4 p-4">
-                    <div className="space-y-2">
-                      <h2 className="text-sm font-medium" title={draft.objective}>
-                        {truncateDraftObjective(draft.objective)}
-                      </h2>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant={isActive ? "default" : "secondary"}>
-                        {getDraftStatusLabel(draft)}
-                      </Badge>
-                      {draft.executionMode ? (
-                        <Badge variant="outline">{draft.executionMode.replace("_", " ")}</Badge>
-                      ) : null}
-                    </div>
-                    <Separator />
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock3Icon className="size-3.5" />
-                      <span>
-                        Created {formatDistanceToNowStrict(new Date(draft.createdAt))} ago
-                      </span>
-                    </div>
-                  </div>
-                </Button>
+                  onDelete={(event) => handleDeleteDraft(draft.id, event)}
+                  onSelect={() => handleSelectDraft(draft.id)}
+                />
               );
             })}
           </div>
@@ -1041,6 +1658,32 @@ export function DraftsDashboardClient({
           </Card>
         ) : !selectedDraftId && (isRestoring || draftsQuery.isLoading) ? (
           <DraftWorkspaceSkeleton />
+        ) : isMissingRequestedDraft ? (
+          <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
+            <CardContent className="flex h-full items-center justify-center py-0">
+              <Empty className="max-w-md border-border">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FileTextIcon className="size-4" />
+                  </EmptyMedia>
+                  <EmptyTitle>Draft not found</EmptyTitle>
+                  <EmptyDescription>
+                    This draft is no longer available. Choose another draft from the list or go back to the drafts view.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <Button
+                  onClick={() => {
+                    startTransition(() => {
+                      router.replace(pathname, { scroll: false });
+                    });
+                  }}
+                  type="button"
+                >
+                  Back to drafts
+                </Button>
+              </Empty>
+            </CardContent>
+          </Card>
         ) : !selectedDraftId ? (
           <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
             <CardContent className="flex h-full items-center justify-center py-0">
@@ -1113,9 +1756,11 @@ export function DraftsDashboardClient({
             onToggleMode={setMode}
             onToggleReviewEditing={() => setIsEditingReview((current) => !current)}
             reviewMarkdown={reviewMarkdown}
+            toolPreflight={toolPreflight}
           />
         )
       }
-    />
+      />
+    </>
   );
 }

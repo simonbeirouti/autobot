@@ -1,4 +1,5 @@
 import { HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
+import type { DynamicStructuredTool } from "@langchain/core/tools";
 import type { z } from "zod";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
@@ -25,6 +26,18 @@ export type ConfiguredChatModel = {
   provider: ClarifierProvider;
   modelName: string;
   invoke: (messages: BaseMessage[]) => Promise<{ content: BaseMessage["content"] }>;
+  bindTools: (
+    tools: DynamicStructuredTool[],
+  ) => {
+    invoke: (messages: BaseMessage[]) => Promise<{
+      content: BaseMessage["content"];
+      tool_calls?: Array<{
+        id?: string;
+        name?: string;
+        args?: Record<string, unknown>;
+      }>;
+    }>;
+  };
   withStructuredOutput: <TSchema extends z.ZodTypeAny>(
     schema: TSchema,
     options?: { name?: string; strict?: boolean; method?: "jsonSchema" },
@@ -119,6 +132,12 @@ function createOpenAiChatModel(): ConfiguredChatModel | null {
     provider: "openai",
     modelName,
     invoke: (messages) => model.invoke(messages),
+    bindTools: (tools) => {
+      const bound = model.bindTools(tools);
+      return {
+        invoke: (messages) => bound.invoke(messages),
+      };
+    },
     withStructuredOutput(schema, options) {
       const structured = model.withStructuredOutput(schema, {
         name: options?.name ?? "structured_output",
@@ -183,6 +202,12 @@ function createAnthropicChatModel(): ConfiguredChatModel | null {
     provider: "anthropic",
     modelName,
     invoke: (messages) => model.invoke(messages),
+    bindTools: (tools) => {
+      const bound = model.bindTools(tools);
+      return {
+        invoke: (messages) => bound.invoke(messages),
+      };
+    },
     withStructuredOutput(schema, options) {
       const structured = model.withStructuredOutput(schema, {
         name: options?.name ?? "structured_output",

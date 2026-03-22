@@ -6,9 +6,9 @@ import {
 export default function RunsPage() {
   return (
     <PageShell
-      contentClassName="h-full max-w-none"
-      scrollable={false}
-      scrollableClassName="overflow-y-auto xl:overflow-hidden"
+      contentClassName="max-w-none xl:h-full"
+      scrollable
+      scrollableClassName="xl:overflow-hidden"
     >
       <RunsDashboardClient
         initialWorkspace={null}

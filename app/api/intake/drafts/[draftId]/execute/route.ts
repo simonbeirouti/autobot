@@ -1,6 +1,14 @@
+import { randomUUID } from "crypto";
+
 import { NextResponse } from "next/server";
 
 import { buildInitialRunPayload } from "@/lib/agents/orchestrator";
+import {
+  buildToolAuthActionRequired,
+  buildToolInputActionRequired,
+  sendRunBlockedInAppNotification,
+} from "@/lib/runs/action-required";
+import type { RunActionRequired } from "@/lib/runs/types";
 import { writeLongTermMemory } from "@/lib/memory/repository";
 import { resolveCompanyKey } from "@/lib/projects/context";
 import { createObjective, updateObjective } from "@/lib/projects/repository";
@@ -12,9 +20,38 @@ import {
   insertRunEvents,
   insertRunTasks,
   insertUsageRecords,
+  updateRunStatus,
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import { buildProjectToolPreflight } from "@/lib/tools/preflight";
+import { getMissingRequiredToolInputsForRunTasks } from "@/lib/tools/input-requirements";
+import { buildMissingToolkitChecklist, resolveProjectToolRuntime } from "@/lib/tools/runtime";
+
+function reindexTasks<T extends { position: number }>(tasks: T[]) {
+  return tasks.map((task, index) => ({
+    ...task,
+    position: index,
+  }));
+}
+
+type RunTaskRecord = {
+  runId: string;
+  title: string;
+  description: string | null;
+  status: "waiting" | "underway" | "complete";
+  position: number;
+  agentId: string | null;
+  agentLabel: string | null;
+  toolRequirement: "none" | "optional" | "required";
+  requiredToolkitSlugs: string[];
+  optionalToolkitSlugs: string[];
+  requiredToolIds: string[];
+  executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
+  toolSummary: string | null;
+  toolInput: Record<string, Record<string, unknown>>;
+  actionRequired?: RunActionRequired | null;
+};
 
 export async function POST(
   _request: Request,
@@ -71,6 +108,55 @@ export async function POST(
       return NextResponse.json({ error: "Draft is missing a project." }, { status: 409 });
     }
 
+    const toolRuntime = await resolveProjectToolRuntime(supabase, {
+      userId: user.sub,
+      projectId: draft.projectId,
+      query: draft.objective,
+    });
+
+    const previewPayload = buildInitialRunPayload({
+      runId: "preview",
+      sessionId: draft.sessionId,
+      objective: draft.objective,
+      activeToolkitSlugs: toolRuntime.activeToolkitSlugs,
+      selectedToolkitSlugs: toolRuntime.selectedToolkitSlugs,
+      result: {
+        status: "ready_to_execute",
+        summary: draft.clarificationSummary ?? "Draft approved for execution.",
+        confidenceToProceed: draft.confidenceToProceed ?? 0.8,
+        executionMode: draft.executionMode,
+        questions: [],
+        draftMarkdown: draft.draftMarkdown ?? draft.generatedMarkdown ?? "",
+        tasks: draft.taskDrafts,
+        eventNarrative: draft.eventNarrative,
+      },
+    });
+    const toolPreflight = await buildProjectToolPreflight(supabase, {
+      userId: user.sub,
+      projectId: draft.projectId,
+      objective: draft.objective,
+      tasks: previewPayload.tasks.map((task) => ({
+        title: task.title,
+        toolRequirement: task.toolRequirement,
+        executionStrategy: task.executionStrategy,
+        toolSummary: task.toolSummary,
+        requiredToolkitSlugs: task.requiredToolkitSlugs,
+        optionalToolkitSlugs: task.optionalToolkitSlugs,
+      })),
+      nextPath: `/dashboard/drafts?draftId=${draft.id}`,
+      discoverMissingToolkitRequirements: true,
+    });
+
+    if (toolPreflight.launchState === "blocked") {
+      return NextResponse.json(
+        {
+          error: "Connect the required tools before starting execution.",
+          toolPreflight,
+        },
+        { status: 409 },
+      );
+    }
+
     const run = await createRun(supabase, {
       sessionId: draft.sessionId,
       userId: user.sub,
@@ -108,21 +194,21 @@ export async function POST(
           status: "active",
         });
 
-    const initialPayload = buildInitialRunPayload({
-      runId: run.id,
-      sessionId: draft.sessionId,
-      objective: draft.objective,
-      result: {
-        status: "ready_to_execute",
-        summary: draft.clarificationSummary ?? "Draft approved for execution.",
-        confidenceToProceed: draft.confidenceToProceed ?? 0.8,
-        executionMode: draft.executionMode,
-        questions: [],
-        draftMarkdown: draft.draftMarkdown ?? draft.generatedMarkdown ?? "",
-        tasks: draft.taskDrafts,
-        eventNarrative: draft.eventNarrative,
-      },
-    });
+    const initialPayload = {
+      ...previewPayload,
+      tasks: previewPayload.tasks.map((task) => ({
+        ...task,
+        runId: run.id,
+      })),
+      events: previewPayload.events.map((event) => ({
+        ...event,
+        runId: run.id,
+      })),
+      usage: previewPayload.usage.map((usage) => ({
+        ...usage,
+        runId: run.id,
+      })),
+    };
 
     await appendClarificationMessage(supabase, {
       sessionId: draft.sessionId,
@@ -130,7 +216,89 @@ export async function POST(
       role: "assistant",
       content: `Execution confirmed.\n\n${draft.draftMarkdown ?? draft.generatedMarkdown ?? draft.clarificationSummary ?? ""}`,
     });
-    await insertRunTasks(supabase, initialPayload.tasks);
+
+    let actionRequired: RunActionRequired | null = null;
+    let taskRecords: RunTaskRecord[] = initialPayload.tasks;
+    const missingToolInputs = getMissingRequiredToolInputsForRunTasks({
+      tasks: taskRecords,
+    });
+
+    if (missingToolInputs.length > 0) {
+      actionRequired = buildToolInputActionRequired({
+        runId: run.id,
+        requiredToolInputs: missingToolInputs,
+        blockingTaskTitle: missingToolInputs[0]?.taskTitle ?? null,
+        actionHref: `/dashboard/runs?runId=${run.id}`,
+      });
+
+      taskRecords = reindexTasks(
+        initialPayload.tasks.map((task) => ({
+          ...task,
+          status: "waiting" as const,
+          actionRequired,
+        })),
+      );
+    } else if (toolPreflight.blockingToolkitSlugs.length > 0) {
+      const blockingReadiness = toolPreflight.readiness.filter((item) =>
+        toolPreflight.blockingToolkitSlugs.includes(item.toolkitSlug),
+      );
+      actionRequired = buildToolAuthActionRequired({
+        runId: run.id,
+        readiness: blockingReadiness,
+        preflight: {
+          ...toolPreflight,
+          recommendedAction:
+            toolPreflight.recommendedAction
+              ? {
+                  ...toolPreflight.recommendedAction,
+                  href: `/dashboard/runs?runId=${run.id}&connectTools=1`,
+                  target: {
+                    kind: "connect_tools_modal",
+                    href: `/dashboard/runs?runId=${run.id}&connectTools=1`,
+                  },
+                }
+              : null,
+        },
+        title: "Connect tools to start this run",
+        body: "This run is ready, but it needs provider authentication or setup before execution can begin.",
+        actionHref: `/dashboard/runs?runId=${run.id}&connectTools=1`,
+      });
+
+      const setupTasks = buildMissingToolkitChecklist({
+        ...toolRuntime,
+        missingPrerequisites: toolRuntime.missingPrerequisites.filter((item) =>
+          toolPreflight.blockingToolkitSlugs.includes(item.toolkitSlug),
+        ),
+      }).map((item) => ({
+        id: randomUUID(),
+        runId: run.id,
+        title: item.title,
+        description: item.description,
+        status: "waiting" as const,
+        position: 0,
+        agentId: "operator" as const,
+        agentLabel: "Operator" as const,
+        toolRequirement: "required" as const,
+        requiredToolkitSlugs: [item.toolkitSlug],
+        optionalToolkitSlugs: [] as string[],
+        requiredToolIds: [] as string[],
+        executionStrategy: "manual_setup" as const,
+        toolSummary: item.description,
+        toolInput: {},
+        actionRequired,
+      }));
+
+      taskRecords = reindexTasks([
+        ...setupTasks,
+        ...initialPayload.tasks.map((task) => ({
+          ...task,
+          status: "waiting" as const,
+          actionRequired,
+        })),
+      ]);
+    }
+
+    await insertRunTasks(supabase, taskRecords);
     await insertRunEvents(supabase, initialPayload.events);
     await insertUsageRecords(supabase, user.sub, [
       ...initialPayload.usage,
@@ -149,6 +317,15 @@ export async function POST(
       },
     ]);
 
+    if (actionRequired) {
+      await updateRunStatus(supabase, {
+        runId: run.id,
+        userId: user.sub,
+        status: "blocked",
+        actionRequired,
+      });
+    }
+
     await updateIntakeDraft(supabase, {
       draftId,
       userId: user.sub,
@@ -161,26 +338,69 @@ export async function POST(
       },
     });
 
-    await writeLongTermMemory(supabase, {
-      userId: user.sub,
-      companyKey,
-      projectId: draft.projectId,
-      objectiveId: objective.id,
-      scope: "objective",
-      kind: "objective",
-      sourceType: "draft_execution",
-      sourceId: draft.id,
-      summary: draft.clarificationSummary ?? `Execution objective for ${objective.title}`,
-      content: draft.draftMarkdown ?? draft.generatedMarkdown ?? draft.objective,
-      metadata: {
-        draftId: draft.id,
-        runId: run.id,
+    if (actionRequired) {
+      try {
+        await sendRunBlockedInAppNotification(supabase, {
+          userId: user.sub,
+          runId: run.id,
+          objective: run.objective,
+          actionRequired,
+        });
+
+        actionRequired = {
+          ...actionRequired,
+          notifiedAt: new Date().toISOString(),
+        };
+
+        await updateRunStatus(supabase, {
+          runId: run.id,
+          userId: user.sub,
+          status: "blocked",
+          actionRequired,
+        });
+      } catch (notificationError) {
+        console.error("Unable to send blocked-run notification after draft execution", {
+          error: notificationError,
+          draftId,
+          runId: run.id,
+          userId: user.sub,
+        });
+      }
+    }
+
+    try {
+      await writeLongTermMemory(supabase, {
+        userId: user.sub,
+        companyKey,
         projectId: draft.projectId,
         objectiveId: objective.id,
-      },
-    });
+        scope: "objective",
+        kind: "objective",
+        sourceType: "draft_execution",
+        sourceId: draft.id,
+        summary: draft.clarificationSummary ?? `Execution objective for ${objective.title}`,
+        content: draft.draftMarkdown ?? draft.generatedMarkdown ?? draft.objective,
+        metadata: {
+          draftId: draft.id,
+          runId: run.id,
+          projectId: draft.projectId,
+          objectiveId: objective.id,
+        },
+      });
+    } catch (memoryError) {
+      console.error("Unable to persist draft execution memory", {
+        error: memoryError,
+        draftId,
+        runId: run.id,
+        userId: user.sub,
+      });
+    }
 
-    return NextResponse.json({ runId: run.id });
+    return NextResponse.json({
+      runId: run.id,
+      runStatus: actionRequired ? "blocked" : run.status,
+      actionRequired,
+    });
   } catch (error) {
     console.error("POST /api/intake/drafts/[draftId]/execute failed", error);
     return NextResponse.json(

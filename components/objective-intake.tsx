@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ import {
 import { useDelayedVisibility } from "@/lib/query/use-delayed-visibility";
 import type { IntakeDraft, IntakeFlowResponse } from "@/lib/intake/types";
 import { cn } from "@/lib/utils";
+import { buildAuthHref } from "@/components/auth/auth-route";
 
 const starterPrompts = [
   "Launch an AI assistant for our SDR team that can qualify inbound leads.",
@@ -38,6 +40,8 @@ const draftVisibilityClasses = [
   "opacity-20",
 ] as const;
 const ERROR_VISIBILITY_DELAY_MS = 500;
+const OBJECTIVE_START_TOAST_ID = "objective-intake-start";
+const OBJECTIVE_START_SUCCESS_STORAGE_KEY = "autobot-objective-intake-started";
 
 export function ObjectiveIntake({
   projectId,
@@ -77,6 +81,9 @@ export function ObjectiveIntake({
       }),
     onMutate: () => {
       setError(null);
+      toast.loading("Starting objective...", {
+        id: OBJECTIVE_START_TOAST_ID,
+      });
     },
     onSuccess: (flow) => {
       queryClient.setQueryData<IntakeDraft[] | undefined>(
@@ -84,11 +91,28 @@ export function ObjectiveIntake({
         (currentDrafts) => upsertDraftInList(currentDrafts, flow.draft),
       );
       queryClient.setQueryData(dashboardQueryKeys.drafts.flow(flow.draft.id), flow);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          OBJECTIVE_START_SUCCESS_STORAGE_KEY,
+          JSON.stringify({
+            draftId: flow.draft.id,
+            toastId: OBJECTIVE_START_TOAST_ID,
+          }),
+        );
+      }
       startTransition(() => {
         router.push(`/dashboard/drafts?draftId=${flow.draft.id}`);
       });
     },
     onError: (submissionError) => {
+      toast.error(
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Unable to start intake.",
+        {
+          id: OBJECTIVE_START_TOAST_ID,
+        },
+      );
       setError(
         submissionError instanceof Error
           ? submissionError.message
@@ -197,7 +221,7 @@ export function ObjectiveIntake({
             {error.toLowerCase().includes("authentication") ? (
               <>
                 {" "}
-                <Link className="underline underline-offset-4" href="/auth/login">
+                <Link className="underline underline-offset-4" href={buildAuthHref("login")}>
                   Sign in
                 </Link>
                 {" "}to continue.

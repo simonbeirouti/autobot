@@ -2,7 +2,13 @@
 
 import type { ReactNode } from "react";
 
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -10,13 +16,37 @@ import { cn } from "@/lib/utils";
 export function WorkspaceSplitLayout({
   sidebar,
   content,
+  mobileSelector,
+  mobileTitle,
+  mobileDescription,
 }: {
   sidebar: ReactNode;
   content: ReactNode;
+  mobileSelector?: ReactNode;
+  mobileTitle?: ReactNode;
+  mobileDescription?: ReactNode;
 }) {
   return (
-    <section className="flex h-full min-h-0 min-w-full -mx-4 -my-4 flex-1 flex-col gap-2 overflow-hidden xl:grid xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]">
-      {sidebar}
+    <section className="flex min-h-0 min-w-full flex-1 flex-col gap-2 xl:grid xl:h-full xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)] xl:overflow-hidden">
+      {mobileSelector || mobileTitle || mobileDescription ? (
+        <Card className="xl:hidden">
+          <CardHeader className="space-y-4">
+            {mobileSelector ? <div>{mobileSelector}</div> : null}
+            {mobileTitle || mobileDescription ? (
+              <div className="space-y-1">
+                {mobileTitle ? <CardTitle className="text-lg leading-tight">{mobileTitle}</CardTitle> : null}
+                {mobileDescription ? (
+                  <CardDescription className="text-sm leading-relaxed">
+                    {mobileDescription}
+                  </CardDescription>
+                ) : null}
+              </div>
+            ) : null}
+          </CardHeader>
+        </Card>
+      ) : null}
+
+      <div className="hidden xl:block">{sidebar}</div>
       <div className="flex min-h-0 flex-1 flex-col xl:h-full xl:overflow-hidden">{content}</div>
     </section>
   );

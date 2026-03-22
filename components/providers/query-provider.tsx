@@ -1,6 +1,7 @@
 "use client";
 
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
+import type { Query } from "@tanstack/react-query";
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { useEffect, useRef, useState } from "react";
@@ -15,6 +16,33 @@ import { useAuth } from "@/components/providers/auth-provider";
 
 const GUEST_QUERY_SCOPE = "guest";
 const QUERY_SCOPE_STORAGE_KEY = "autobot-query-scope";
+
+function isPersistedQuery(query: Query) {
+  const [namespace, key] = query.queryKey as [string?, string?];
+
+  if (query.state.status !== "success" || query.state.fetchStatus === "fetching") {
+    return false;
+  }
+
+  if (namespace === "tools" && key === "onboarding") {
+    return false;
+  }
+
+  if (namespace === "projects" || namespace === "project-workspace") {
+    return false;
+  }
+
+  if (
+    namespace === "draft-flow" ||
+    namespace === "draft-preflight" ||
+    namespace === "run-workspace" ||
+    namespace === "run-preflight"
+  ) {
+    return false;
+  }
+
+  return true;
+}
 
 function createQueryClient() {
   return new QueryClient({
@@ -64,6 +92,9 @@ function ScopedPersistedQueryProvider({
         buster: `${QUERY_CACHE_BUSTER}:${cacheScope}`,
         maxAge: 1000 * 60 * 60 * 24,
         persister: queryPersister,
+        dehydrateOptions: {
+          shouldDehydrateQuery: (query) => isPersistedQuery(query),
+        },
       }}
     >
       {children}

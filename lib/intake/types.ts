@@ -4,6 +4,7 @@ import type {
   ClarificationTaskDraft,
 } from "@/lib/agents/schemas";
 import type { ExecutionMode } from "@/lib/runs/types";
+import type { RunToolPreflight } from "@/lib/tools/types";
 
 export const INTAKE_DRAFT_STATUSES = [
   "collecting_input",
@@ -75,4 +76,5 @@ export type IntakeDraftWithQuestions = {
 export type IntakeFlowResponse = IntakeDraftWithQuestions & {
   runId?: string;
   error?: string;
+  toolPreflight?: RunToolPreflight | null;
 };

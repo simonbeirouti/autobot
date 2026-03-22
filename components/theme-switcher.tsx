@@ -22,6 +22,7 @@ export function ThemeSwitcher() {
   return (
     <Button
       variant="outline"
+      size="icon"
       onClick={() => setTheme(nextTheme)}
       aria-label={`Switch theme. Current preference: ${label}`}
     >

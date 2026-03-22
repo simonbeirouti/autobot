@@ -14,6 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useState } from "react";
+import { buildAuthHref } from "@/components/auth/auth-route";
+import { buildAuthErrorHref, getAuthFlowError } from "@/components/auth/auth-error";
+import { useRouter } from "next/navigation";
 
 export function ForgotPasswordForm({
   className,
@@ -23,6 +26,7 @@ export function ForgotPasswordForm({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,12 +37,17 @@ export function ForgotPasswordForm({
     try {
       // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/update-password`,
+        redirectTo: `${window.location.origin}${buildAuthHref("update-password")}`,
       });
       if (error) throw error;
       setSuccess(true);
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
+      const authError = getAuthFlowError(error, "forgot-password");
+      if (authError.code === "invalid-credentials") {
+        setError(authError.message);
+        return;
+      }
+      router.push(buildAuthErrorHref(authError.code, authError.message));
     } finally {
       setIsLoading(false);
     }
@@ -90,7 +99,7 @@ export function ForgotPasswordForm({
               <div className="mt-4 text-center text-sm">
                 Already have an account?{" "}
                 <Link
-                  href="/auth/login"
+                  href={buildAuthHref("login")}
                   className="underline underline-offset-4"
                 >
                   Login

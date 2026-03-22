@@ -15,6 +15,17 @@ import {
 } from "@/lib/runs/repository";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
+import {
+  buildProjectToolPreflight,
+  resolveProjectToolPlanningTasks,
+} from "@/lib/tools/preflight";
+import {
+  applyAnsweredToolInputQuestions,
+  buildMissingToolInputQuestions,
+  withInferredToolInputs,
+} from "@/lib/tools/input-requirements";
+import { resolveProjectTools } from "@/lib/tools/resolver";
+import { resolveProjectToolRuntime } from "@/lib/tools/runtime";
 
 const bodySchema = z.object({
   projectId: z.string().uuid(),
@@ -46,6 +57,17 @@ export async function POST(request: Request) {
     const payload = bodySchema.parse(await request.json());
     const sessionId = createSessionId();
     const supabase = await createClient();
+    const [projectTools, toolRuntime] = await Promise.all([
+      resolveProjectTools(supabase, {
+        userId: user.sub,
+        projectId: payload.projectId,
+      }),
+      resolveProjectToolRuntime(supabase, {
+        userId: user.sub,
+        projectId: payload.projectId,
+        query: payload.objective,
+      }),
+    ]);
     const draft = await createIntakeDraft(supabase, {
       sessionId,
       userId: user.sub,
@@ -64,6 +86,20 @@ export async function POST(request: Request) {
       objective: payload.objective,
       transcript: [{ role: "user", content: payload.objective }],
       clarificationRounds: 0,
+      planningContext: {
+        markdown: [
+          projectTools.markdown,
+          toolRuntime.toolCandidates.length > 0
+            ? `Likely helpful tools: ${toolRuntime.toolCandidates
+                .slice(0, 8)
+                .map((candidate) => `${candidate.title} [${candidate.toolkitSlug}]`)
+                .join(", ")}`
+            : "Likely helpful tools: none identified yet.",
+        ].join("\n"),
+        selectedToolkitSlugs: projectTools.selectedToolkitSlugs,
+        activeToolkitSlugs: projectTools.activeToolkitSlugs,
+        inactiveToolkitSlugs: projectTools.inactiveToolkitSlugs,
+      },
     });
 
     await appendClarificationMessage(supabase, {
@@ -74,28 +110,85 @@ export async function POST(request: Request) {
       questions: result.questions.map((question) => question.prompt),
     });
 
-    const isReviewReady = result.status === "ready_to_execute";
+    const isPlannerReady = result.status === "ready_to_execute";
+    const taskDrafts = isPlannerReady
+      ? (
+          await resolveProjectToolPlanningTasks(supabase, {
+            userId: user.sub,
+            projectId: payload.projectId,
+            objective: payload.objective,
+            tasks: result.tasks.map((task) => ({
+              title: task.title,
+              description: task.description,
+              toolRequirement: task.toolRequirement,
+              executionStrategy: task.executionStrategy,
+              toolSummary: task.toolSummary || null,
+              requiredToolkitSlugs: task.requiredToolkitSlugs,
+              optionalToolkitSlugs: task.optionalToolkitSlugs,
+            })),
+            discoverMissingToolkitRequirements: true,
+          })
+        ).map((task, index) => ({
+          ...result.tasks[index],
+          toolRequirement: task.toolRequirement,
+          executionStrategy: task.executionStrategy,
+          toolSummary: task.toolSummary ?? result.tasks[index]?.toolSummary ?? "",
+          requiredToolkitSlugs: task.requiredToolkitSlugs,
+          optionalToolkitSlugs: task.optionalToolkitSlugs,
+        }))
+      : result.tasks;
+    const taskDraftsWithInput = applyAnsweredToolInputQuestions({
+      tasks: withInferredToolInputs({
+        objective: payload.objective,
+        tasks: taskDrafts,
+      }),
+      questions: [],
+    });
+    const missingToolInputQuestions =
+      isPlannerReady ? buildMissingToolInputQuestions({ tasks: taskDraftsWithInput }) : [];
+    const isReviewReady = isPlannerReady && missingToolInputQuestions.length === 0;
     const savedQuestions = await replaceIntakeQuestions(supabase, {
       draftId: draft.id,
-      questions: result.questions,
+      questions: [...result.questions, ...missingToolInputQuestions],
     });
     const savedDraft = await updateIntakeDraft(supabase, {
       draftId: draft.id,
       userId: user.sub,
       patch: {
         status: isReviewReady ? "review_ready" : "collecting_input",
-        clarificationSummary: result.summary,
+        clarificationSummary:
+          missingToolInputQuestions.length > 0
+            ? `${result.summary}\n\nAutoBot needs a few missing tool details before the draft is ready to execute.`
+            : result.summary,
         executionMode: result.executionMode,
         confidenceToProceed: result.confidenceToProceed,
         currentStep: 0,
-        questionCount: result.questions.length,
+        questionCount: result.questions.length + missingToolInputQuestions.length,
         generatedMarkdown: result.draftMarkdown || null,
         draftMarkdown: result.draftMarkdown || null,
-        taskDrafts: result.tasks,
+        taskDrafts: taskDraftsWithInput,
         eventNarrative: result.eventNarrative,
         lastGeneratedAt: isReviewReady ? new Date().toISOString() : null,
       },
     });
+    const toolPreflight =
+      isReviewReady
+        ? await buildProjectToolPreflight(supabase, {
+            userId: user.sub,
+            projectId: payload.projectId,
+            objective: payload.objective,
+            tasks: taskDrafts.map((task) => ({
+              title: task.title,
+              description: task.description,
+              toolRequirement: task.toolRequirement,
+              executionStrategy: task.executionStrategy,
+              toolSummary: task.toolSummary || null,
+              requiredToolkitSlugs: task.requiredToolkitSlugs,
+              optionalToolkitSlugs: task.optionalToolkitSlugs,
+            })),
+            nextPath: `/dashboard/drafts?draftId=${draft.id}`,
+          })
+        : null;
 
     await insertUsageRecords(supabase, user.sub, [
       {
@@ -116,6 +209,7 @@ export async function POST(request: Request) {
     const response: IntakeFlowResponse = {
       draft: savedDraft,
       questions: savedQuestions,
+      toolPreflight,
     };
 
     return NextResponse.json(response);

@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ClarificationMessage,
   RunEvent,
+  RunActionRequired,
   RunListItem,
   RunRecord,
   RunTask,
@@ -14,6 +15,7 @@ import type {
   ExecutionMode,
   RunStatus,
 } from "@/lib/runs/types";
+import { buildProjectToolPreflight } from "@/lib/tools/preflight";
 
 function asObject<T>(value: T) {
   return value;
@@ -78,7 +80,7 @@ export async function fetchRuns(
   let query = supabase
     .from("runs")
     .select(
-      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at",
+      "id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
     )
     .eq("user_id", params.userId)
     .order("updated_at", { ascending: false });
@@ -103,7 +105,7 @@ export async function fetchLatestRunBySessionId(
   const { data, error } = await supabase
     .from("runs")
     .select(
-      "id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at",
+      "id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
     )
     .eq("session_id", params.sessionId)
     .eq("user_id", params.userId)
@@ -128,6 +130,7 @@ export async function createRun(
     objective: string;
     executionMode: ExecutionMode;
     readinessSummary: string;
+    actionRequired?: RunActionRequired | null;
   },
 ) {
   const { data, error } = await supabase
@@ -141,8 +144,9 @@ export async function createRun(
       status: "ready",
       execution_mode: params.executionMode,
       readiness_summary: params.readinessSummary,
+      action_required: params.actionRequired ?? null,
     })
-    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at")
+    .select("id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at")
     .single();
 
   if (error) {
@@ -162,6 +166,14 @@ export async function insertRunTasks(
     position: number;
     agentId: string | null;
     agentLabel: string | null;
+    toolRequirement: "none" | "optional" | "required";
+    requiredToolkitSlugs: string[];
+    optionalToolkitSlugs: string[];
+    requiredToolIds: string[];
+    executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
+    toolSummary: string | null;
+    toolInput: Record<string, Record<string, unknown>>;
+    actionRequired?: RunActionRequired | null;
   }>,
 ) {
   if (tasks.length === 0) {
@@ -173,11 +185,19 @@ export async function insertRunTasks(
       run_id: task.runId,
       title: task.title,
       description: task.description,
-      status: task.status,
-      position: task.position,
-      agent_id: task.agentId,
-      agent_label: task.agentLabel,
-    })),
+        status: task.status,
+        position: task.position,
+        agent_id: task.agentId,
+        agent_label: task.agentLabel,
+        tool_requirement: task.toolRequirement,
+        required_toolkit_slugs: task.requiredToolkitSlugs,
+        optional_toolkit_slugs: task.optionalToolkitSlugs,
+        required_tool_ids: task.requiredToolIds,
+        execution_strategy: task.executionStrategy,
+        tool_summary: task.toolSummary,
+        tool_input: task.toolInput ?? {},
+        action_required: task.actionRequired ?? null,
+      })),
   );
 
   if (error) {
@@ -224,8 +244,28 @@ export async function insertUsageRecords(
     return;
   }
 
+  const normalizeTimestamp = (value: string | null | undefined) => {
+    if (typeof value !== "string") {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+
+    return parsed.toISOString();
+  };
+
   const { error } = await supabase.from("usage_records").insert(
     usageRecords.map((record) => {
+      const startedAt = normalizeTimestamp(record.startedAt) ?? new Date().toISOString();
+      const finishedAt = normalizeTimestamp(record.finishedAt);
       const row = {
         run_id: record.runId,
         session_id: record.sessionId,
@@ -239,8 +279,8 @@ export async function insertUsageRecords(
         token_count: record.tokenCount,
         latency_ms: record.latencyMs,
         cost_estimate: record.costEstimate,
-        ...(record.startedAt !== undefined ? { started_at: record.startedAt } : {}),
-        ...(record.finishedAt !== undefined ? { finished_at: record.finishedAt } : {}),
+        started_at: startedAt,
+        ...(record.finishedAt !== undefined && finishedAt ? { finished_at: finishedAt } : {}),
       };
 
       return row;
@@ -258,7 +298,7 @@ export async function fetchWorkspace(
 ) {
   const { data: runRow, error: runError } = await supabase
     .from("runs")
-    .select("id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, created_at, updated_at")
+    .select("id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at")
     .eq("id", params.runId)
     .eq("user_id", params.userId)
     .single();
@@ -271,7 +311,7 @@ export async function fetchWorkspace(
     await Promise.all([
       supabase
         .from("run_tasks")
-        .select("id, run_id, title, description, status, position, agent_id, agent_label, created_at, updated_at")
+        .select("id, run_id, title, description, status, position, agent_id, agent_label, tool_requirement, required_toolkit_slugs, optional_toolkit_slugs, required_tool_ids, execution_strategy, tool_summary, tool_input, action_required, created_at, updated_at")
         .eq("run_id", params.runId)
         .order("position", { ascending: true }),
       supabase
@@ -296,11 +336,24 @@ export async function fetchWorkspace(
     throw usageError;
   }
 
+  const run = mapRun(runRow);
+  const tasks = (taskRows ?? []).map(mapTask);
+
   return asObject<WorkspacePayload>({
-    run: mapRun(runRow),
-    tasks: (taskRows ?? []).map(mapTask),
+    run,
+    tasks,
     events: (eventRows ?? []).map(mapEvent),
     usage: (usageRows ?? []).map(mapUsage),
+    toolPreflight:
+      run.projectId
+        ? await buildProjectToolPreflight(supabase, {
+            userId: params.userId,
+            projectId: run.projectId,
+            objective: run.objective,
+            tasks,
+            nextPath: `/dashboard/runs?runId=${run.id}`,
+          })
+        : null,
   });
 }
 
@@ -311,6 +364,7 @@ export async function updateRunStatus(
     userId: string;
     status: RunStatus;
     finalSummary?: string | null;
+    actionRequired?: RunActionRequired | null;
   },
 ) {
   const payload: Record<string, unknown> = {
@@ -319,6 +373,9 @@ export async function updateRunStatus(
 
   if (params.finalSummary !== undefined) {
     payload.final_summary = params.finalSummary;
+  }
+  if (params.actionRequired !== undefined) {
+    payload.action_required = params.actionRequired;
   }
 
   const { error } = await supabase
@@ -347,6 +404,14 @@ export async function updateTaskStatuses(
         status: task.status,
         agent_id: task.agentId,
         agent_label: task.agentLabel,
+        tool_requirement: task.toolRequirement,
+        required_toolkit_slugs: task.requiredToolkitSlugs,
+        optional_toolkit_slugs: task.optionalToolkitSlugs,
+        required_tool_ids: task.requiredToolIds,
+        execution_strategy: task.executionStrategy,
+        tool_summary: task.toolSummary,
+        tool_input: task.toolInput ?? {},
+        action_required: task.actionRequired ?? null,
       })
       .eq("id", task.id)
       .eq("run_id", params.runId);
@@ -357,8 +422,111 @@ export async function updateTaskStatuses(
   }
 }
 
+export async function syncRunTasks(
+  supabase: SupabaseClient,
+  params: {
+    runId: string;
+    tasks: RunTask[];
+  },
+) {
+  const { error: deleteError } = await supabase
+    .from("run_tasks")
+    .delete()
+    .eq("run_id", params.runId);
+
+  if (deleteError) {
+    throw deleteError;
+  }
+
+  if (params.tasks.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.from("run_tasks").insert(
+    params.tasks.map((task) => ({
+      id: task.id,
+      run_id: task.runId,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      position: task.position,
+      agent_id: task.agentId,
+      agent_label: task.agentLabel,
+      tool_requirement: task.toolRequirement,
+      required_toolkit_slugs: task.requiredToolkitSlugs,
+      optional_toolkit_slugs: task.optionalToolkitSlugs,
+      required_tool_ids: task.requiredToolIds,
+      execution_strategy: task.executionStrategy,
+      tool_summary: task.toolSummary,
+      tool_input: task.toolInput ?? {},
+      action_required: task.actionRequired ?? null,
+    })),
+  );
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function listBlockedRunsForUser(
+  supabase: SupabaseClient,
+  params: { userId: string },
+) {
+  const { data, error } = await supabase
+    .from("runs")
+    .select(
+      "id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
+    )
+    .eq("user_id", params.userId)
+    .eq("status", "blocked")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapRun);
+}
+
+export async function listRunsForWatchdog(
+  supabase: SupabaseClient,
+  params: {
+    userId?: string;
+    statuses?: RunStatus[];
+    limit?: number;
+  },
+) {
+  let query = supabase
+    .from("runs")
+    .select(
+      "id, user_id, session_id, project_id, objective_id, objective, status, execution_mode, readiness_summary, final_summary, action_required, created_at, updated_at",
+    )
+    .order("updated_at", { ascending: true });
+
+  if (params.userId) {
+    query = query.eq("user_id", params.userId);
+  }
+
+  if (params.statuses && params.statuses.length > 0) {
+    query = query.in("status", params.statuses);
+  }
+
+  if (params.limit) {
+    query = query.limit(params.limit);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapRun);
+}
+
 function mapRun(row: {
   id: string;
+  user_id?: string | null;
   session_id: string;
   project_id: string | null;
   objective_id: string | null;
@@ -367,12 +535,14 @@ function mapRun(row: {
   execution_mode: ExecutionMode;
   readiness_summary: string | null;
   final_summary: string | null;
+  action_required?: RunActionRequired | null;
   created_at: string;
   updated_at: string;
 }): RunRecord {
   return {
     id: row.id,
     sessionId: row.session_id,
+    userId: row.user_id ?? null,
     projectId: row.project_id,
     objectiveId: row.objective_id,
     objective: row.objective,
@@ -380,6 +550,7 @@ function mapRun(row: {
     executionMode: row.execution_mode,
     readinessSummary: row.readiness_summary,
     finalSummary: row.final_summary,
+    actionRequired: row.action_required ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -394,6 +565,14 @@ function mapTask(row: {
   position: number;
   agent_id: string | null;
   agent_label: string | null;
+  tool_requirement: "none" | "optional" | "required";
+  required_toolkit_slugs: string[] | null;
+  optional_toolkit_slugs: string[] | null;
+  required_tool_ids: string[] | null;
+  execution_strategy: "manual_setup" | "tool_execution" | "analysis_only";
+  tool_summary: string | null;
+  tool_input: Record<string, Record<string, unknown>> | null;
+  action_required: RunActionRequired | null;
   created_at: string;
   updated_at: string;
 }) {
@@ -406,6 +585,14 @@ function mapTask(row: {
     position: row.position,
     agentId: row.agent_id,
     agentLabel: row.agent_label,
+    toolRequirement: row.tool_requirement ?? "none",
+    requiredToolkitSlugs: row.required_toolkit_slugs ?? [],
+    optionalToolkitSlugs: row.optional_toolkit_slugs ?? [],
+    requiredToolIds: row.required_tool_ids ?? [],
+    executionStrategy: row.execution_strategy,
+    toolSummary: row.tool_summary,
+    toolInput: row.tool_input ?? {},
+    actionRequired: row.action_required ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

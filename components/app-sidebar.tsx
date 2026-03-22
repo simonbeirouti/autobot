@@ -11,11 +11,9 @@ import {
   type SidebarProjectItem,
 } from "@/app/(protected)/layout-config";
 import { NavMain } from "@/components/nav-main";
-import { NavProjects } from "@/components/nav-projects";
 import { ProjectSwitcher } from "@/components/project-switcher";
 import { NavSecondary } from "@/components/nav-secondary";
 import { NavUser } from "@/components/nav-user";
-import { useAuth } from "@/components/providers/auth-provider";
 import {
   Sidebar,
   SidebarContent,
@@ -73,9 +71,19 @@ function findMatchingHref(
 }
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
-  const { user } = useAuth();
   const pathname = usePathname();
   const [lastClickedHref, setLastClickedHref] = React.useState<string | null>(null);
+  const primaryItems = React.useMemo<SidebarNavItem[]>(
+    () => [
+      ...protectedNavMain,
+      ...protectedProjects.map((item) => ({
+        href: item.href,
+        icon: item.icon,
+        title: item.name,
+      })),
+    ],
+    [],
+  );
 
   React.useEffect(() => {
     setLastClickedHref(readCookie(SIDEBAR_ACTIVE_ITEM_COOKIE_NAME));
@@ -106,12 +114,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <NavMain
-          items={protectedNavMain}
-          activeHref={activeHref}
-          onItemClick={handleItemClick}
-        />
-        <NavProjects
-          projects={protectedProjects}
+          items={primaryItems}
           activeHref={activeHref}
           onItemClick={handleItemClick}
         />
@@ -123,7 +126,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
         />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={user} />
+        <NavUser />
       </SidebarFooter>
     </Sidebar>
   );

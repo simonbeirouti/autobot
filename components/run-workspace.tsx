@@ -1,17 +1,31 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
   ActivityIcon,
   BotIcon,
   ClipboardListIcon,
+  PlayIcon,
   WrenchIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
 import {
   Accordion,
   AccordionContent,
@@ -38,7 +52,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { RunEvent, RunTask, WorkspacePayload } from "@/lib/runs/types";
+import type { RunActionRequired, RunEvent, RunTask, WorkspacePayload } from "@/lib/runs/types";
 
 const colorClassMap: Record<string, string> = {
   amber: "text-chart-2",
@@ -47,8 +61,11 @@ const colorClassMap: Record<string, string> = {
   rose: "text-destructive",
 };
 
-export async function fetchWorkspace(runId: string) {
-  return fetchJson<WorkspacePayload>(`/api/runs/${runId}`);
+export async function fetchWorkspace(runId: string, signal?: AbortSignal) {
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}`, {
+    cache: "no-store",
+    signal,
+  });
 }
 
 export async function advanceWorkspace(runId: string) {
@@ -58,11 +75,88 @@ export async function advanceWorkspace(runId: string) {
   });
 }
 
+export async function resumeWorkspace(runId: string) {
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export function buildRunSearchHref(
+  pathname: string,
+  searchParams: Pick<URLSearchParams, "toString">,
+  params: { runId: string; connectTools?: boolean },
+) {
+  const nextParams = new URLSearchParams(searchParams.toString());
+  nextParams.set("runId", params.runId);
+
+  if (params.connectTools) {
+    nextParams.set("connectTools", "1");
+  } else {
+    nextParams.delete("connectTools");
+  }
+
+  const query = nextParams.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
 function groupTasks(tasks: RunTask[]) {
   return {
     waiting: tasks.filter((task) => task.status === "waiting"),
     underway: tasks.filter((task) => task.status === "underway"),
     complete: tasks.filter((task) => task.status === "complete"),
+  };
+}
+
+function buildFallbackActionRequired(data: WorkspacePayload): RunActionRequired | null {
+  if (data.run.actionRequired) {
+    return data.run.actionRequired;
+  }
+
+  const incompleteTasks = data.tasks.filter((task) => task.status !== "complete");
+  const taskActionRequired = incompleteTasks.find((task) => task.actionRequired)?.actionRequired ?? null;
+  if (taskActionRequired) {
+    return taskActionRequired;
+  }
+
+  const setupTasks = incompleteTasks.filter(
+    (task) => task.executionStrategy === "manual_setup" && task.requiredToolkitSlugs.length > 0,
+  );
+  if (setupTasks.length === 0) {
+    return null;
+  }
+
+  const requiredToolkitSlugs = Array.from(
+    new Set(setupTasks.flatMap((task) => task.requiredToolkitSlugs)),
+  );
+
+  return {
+    kind: "manual_setup",
+    title: "Connect tools to continue this run",
+    body: "This run has prerequisite setup tasks before tool-backed work can continue.",
+    reason: "tool_prerequisites_missing",
+    blockingTaskTitle: null,
+    requiredToolkitSlugs,
+    readiness: requiredToolkitSlugs.map((toolkitSlug) => ({
+      toolkitSlug,
+      status: "not_connected",
+      message: `${toolkitSlug} is selected for this project but not connected yet.`,
+    })),
+    taskToolPlan: data.toolPreflight?.taskToolPlan ?? [],
+    actionLabel: "Connect tools",
+    actionHref: `/dashboard/runs?runId=${data.run.id}&connectTools=1`,
+    actionTarget: {
+      kind: "connect_tools_modal",
+      href: `/dashboard/runs?runId=${data.run.id}&connectTools=1`,
+    },
+    resumeLabel: "Resume run",
+    canResume: false,
+    autoResume: true,
+    requiredToolInputs: [],
+    notifiedAt: null,
+    emailFallbackAt: null,
+    emailEscalatedAt: null,
+    resolvedAt: null,
   };
 }
 
@@ -76,6 +170,15 @@ function TaskCard({ task }: { task: RunTask }) {
         </div>
         {task.description ? (
           <p className="text-sm text-muted-foreground">{task.description}</p>
+        ) : null}
+        {task.actionRequired?.requiredToolkitSlugs.length ? (
+          <div className="flex flex-wrap gap-2">
+            {task.actionRequired.requiredToolkitSlugs.map((toolkitSlug) => (
+              <Badge key={toolkitSlug} variant="outline">
+                {toolkitSlug}
+              </Badge>
+            ))}
+          </div>
         ) : null}
       </CardContent>
     </Card>
@@ -208,7 +311,7 @@ function BoardColumnSkeleton({
   return (
     <Card
       className={cn(
-        "min-h-[280px] overflow-hidden py-0 lg:h-full lg:min-h-0",
+        "min-h-[280px] overflow-hidden py-0 xl:h-full xl:min-h-0",
         tone === "amber" && "border-chart-2/40",
         tone === "cyan" && "border-chart-3/40",
         tone === "emerald" && "border-chart-1/40",
@@ -221,8 +324,8 @@ function BoardColumnSkeleton({
         </div>
       </CardHeader>
 
-      <CardContent className="min-h-0 flex-1 p-0 -mt-4">
-        <ScrollArea className="h-full">
+      <CardContent className="flex-1 p-0 -mt-4 xl:min-h-0">
+        <ScrollArea className="xl:h-full">
           <div className="space-y-3 p-4">
             <TaskCardSkeleton />
             <TaskCardSkeleton />
@@ -268,14 +371,14 @@ export function RunWorkspaceSkeleton() {
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
       <WorkspaceHeaderSkeleton />
 
-      <div className="grid md:grid-cols-2 2xl:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-4">
         <StatCardSkeleton />
         <StatCardSkeleton />
         <StatCardSkeleton />
         <StatCardSkeleton />
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2 lg:min-h-0 lg:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-2 xl:min-h-0 xl:grid-cols-3">
         <BoardColumnSkeleton titleWidth="w-24" tone="amber" />
         <BoardColumnSkeleton titleWidth="w-28" tone="cyan" />
         <BoardColumnSkeleton titleWidth="w-28" tone="emerald" />
@@ -288,17 +391,51 @@ export function RunWorkspaceSkeleton() {
 
 export function RunWorkspaceView({
   data,
+  isResuming = false,
+  onResume,
+  onSubmitToolInputs,
+  isSubmittingToolInputs = false,
 }: {
   data: WorkspacePayload;
+  isResuming?: boolean;
+  onResume?: (() => void) | undefined;
+  onSubmitToolInputs?: (inputs: Array<{
+    taskId: string;
+    toolkitSlug: string;
+    field: string;
+    value: string;
+  }>) => void;
+  isSubmittingToolInputs?: boolean;
 }) {
+  const [toolInputDialogOpen, setToolInputDialogOpen] = useState(false);
+  const [toolInputValues, setToolInputValues] = useState<Record<string, string>>({});
   const taskColumns = groupTasks(data.tasks);
   const handoffCount = data.usage.filter((item) => item.category === "agent_handoff").length;
   const toolCount = data.usage.filter((item) => item.category === "tool").length;
   const chatCount = data.usage.filter((item) => item.category === "chat").length;
+  const actionRequired = buildFallbackActionRequired(data);
+  const blockingToolkits = data.toolPreflight?.toolkits.filter(
+    (toolkit) => toolkit.readiness.status !== "ready",
+  ) ?? [];
+  const requiredToolInputs = actionRequired?.requiredToolInputs ?? [];
+
+  useEffect(() => {
+    if (actionRequired?.reason === "tool_inputs_missing" && requiredToolInputs.length > 0) {
+      setToolInputDialogOpen(true);
+      setToolInputValues(
+        Object.fromEntries(
+          requiredToolInputs.map((input) => [
+            `${input.taskId}:${input.toolkitSlug}:${input.field}`,
+            input.value,
+          ]),
+        ),
+      );
+    }
+  }, [actionRequired?.reason, requiredToolInputs]);
 
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
-      <Card className="overflow-hidden border-none">
+      <Card className="hidden overflow-hidden border-none xl:block">
         <CardHeader className="-mt-2">
           <div className="flex flex-col gap-4">
             <div className="min-w-0 space-y-3">
@@ -315,6 +452,56 @@ export function RunWorkspaceView({
                   Updated {formatDistanceToNowStrict(new Date(data.run.updatedAt))} ago
                 </Badge>
               </div>
+              {actionRequired ? (
+                <div className="space-y-3 border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+                  <div className="space-y-1">
+                    <p className="font-semibold text-foreground">{actionRequired.title}</p>
+                    <p className="text-muted-foreground">{actionRequired.body}</p>
+                    {actionRequired.blockingTaskTitle ? (
+                      <p className="text-xs text-muted-foreground">
+                        Blocked task: {actionRequired.blockingTaskTitle}
+                      </p>
+                    ) : null}
+                  </div>
+                  {data.toolPreflight?.toolkits.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {data.toolPreflight.toolkits.map((toolkit) => (
+                        <Badge
+                          key={toolkit.slug}
+                          variant={toolkit.readiness.status === "ready" ? "default" : "outline"}
+                        >
+                          {toolkit.title}: {toolkit.readiness.status.replaceAll("_", " ")}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {actionRequired.reason === "tool_inputs_missing" &&
+                    actionRequired.requiredToolInputs.length > 0 ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => setToolInputDialogOpen(true)}
+                        disabled={isSubmittingToolInputs}
+                      >
+                        Provide details
+                      </Button>
+                    ) : null}
+                    {actionRequired.canResume && onResume ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={onResume}
+                        disabled={isResuming}
+                      >
+                        <PlayIcon className="size-3.5" />
+                        {isResuming ? "Resuming..." : actionRequired.resumeLabel ?? "Resume"}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </CardHeader>
@@ -328,12 +515,50 @@ export function RunWorkspaceView({
       </div>
 
       <div className="grid gap-2 md:grid-cols-2 lg:min-h-0 lg:grid-cols-3">
-          <BoardColumn title="Waiting" tasks={taskColumns.waiting} tone="amber" />
+          <BoardColumn
+            title="Waiting"
+            tasks={taskColumns.waiting}
+            tone="amber"
+            blockedMessage={
+              actionRequired?.reason === "tool_prerequisites_missing"
+                ? "This run is waiting on tool connections before work can continue."
+                : null
+            }
+          />
           <BoardColumn title="Underway" tasks={taskColumns.underway} tone="cyan" />
           <BoardColumn title="Complete" tasks={taskColumns.complete} tone="emerald" />
       </div>
 
-      <Accordion className="min-h-0" collapsible type="single">
+      <Accordion
+        className="min-h-0"
+        defaultValue={
+          actionRequired?.reason === "tool_prerequisites_missing" && blockingToolkits.length > 0
+            ? ["required-apps"]
+            : []
+        }
+        type="multiple"
+      >
+        {actionRequired?.reason === "tool_prerequisites_missing" && blockingToolkits.length > 0 ? (
+          <AccordionItem
+            className="overflow-hidden border border-border bg-background"
+            value="required-apps"
+          >
+            <AccordionTrigger className="w-full border-b px-4 py-3 hover:no-underline">
+              <span className="text-sm font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                Required Apps
+              </span>
+            </AccordionTrigger>
+            <AccordionContent className="pb-0">
+              <div className="p-4">
+                <ToolConnectionChecklist
+                  requiredToolkitSlugs={blockingToolkits.map((toolkit) => toolkit.slug)}
+                  readiness={blockingToolkits.map((toolkit) => toolkit.readiness)}
+                  nextPath={`/dashboard/runs?runId=${data.run.id}`}
+                />
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        ) : null}
         <AccordionItem
           className="overflow-hidden border border-stone-800 bg-stone-950 text-stone-50"
           value="terminal"
@@ -350,6 +575,72 @@ export function RunWorkspaceView({
           </AccordionContent>
         </AccordionItem>
       </Accordion>
+
+      <Dialog open={toolInputDialogOpen} onOpenChange={setToolInputDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Provide required task details</DialogTitle>
+            <DialogDescription>
+              Enter the missing URLs or inputs so AutoBot can continue the blocked tool-backed task.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {requiredToolInputs.map((input) => {
+              const key = `${input.taskId}:${input.toolkitSlug}:${input.field}`;
+              return (
+                <div className="space-y-2" key={key}>
+                  <Label htmlFor={key}>{input.prompt}</Label>
+                  <p className="text-xs text-muted-foreground">{input.helpText}</p>
+                  <Input
+                    id={key}
+                    placeholder={input.placeholder}
+                    value={toolInputValues[key] ?? ""}
+                    onChange={(event) =>
+                      setToolInputValues((current) => ({
+                        ...current,
+                        [key]: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              disabled={
+                isSubmittingToolInputs ||
+                requiredToolInputs.some((input) => {
+                  const key = `${input.taskId}:${input.toolkitSlug}:${input.field}`;
+                  return !(toolInputValues[key] ?? "").trim();
+                })
+              }
+              onClick={() => {
+                if (!onSubmitToolInputs) {
+                  return;
+                }
+
+                onSubmitToolInputs(
+                  requiredToolInputs
+                    .filter((input): input is typeof input & { taskId: string } => Boolean(input.taskId))
+                    .map((input) => {
+                      const key = `${input.taskId}:${input.toolkitSlug}:${input.field}`;
+                      return {
+                        taskId: input.taskId,
+                        toolkitSlug: input.toolkitSlug,
+                        field: input.field,
+                        value: (toolInputValues[key] ?? "").trim(),
+                      };
+                    }),
+                );
+              }}
+            >
+              {isSubmittingToolInputs ? "Saving..." : "Save details"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -366,6 +657,28 @@ export function RunWorkspace({ runId }: { runId: string }) {
     mutationFn: () => advanceWorkspace(runId),
     onSuccess: (payload) => {
       queryClient.setQueryData(dashboardQueryKeys.runs.workspace(runId), payload);
+      queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.notifications.all,
+      });
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error ? mutationError.message : "Unable to advance run.",
+      );
+    },
+  });
+  const resumeMutation = useMutation({
+    mutationFn: () => resumeWorkspace(runId),
+    onSuccess: (payload) => {
+      queryClient.setQueryData(dashboardQueryKeys.runs.workspace(runId), payload);
+      queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.notifications.all,
+      });
+    },
+    onError: (mutationError) => {
+      toast.error(
+        mutationError instanceof Error ? mutationError.message : "Unable to resume run.",
+      );
     },
   });
 
@@ -378,14 +691,32 @@ export function RunWorkspace({ runId }: { runId: string }) {
       return;
     }
 
-    const interval = window.setInterval(() => {
+    if (data.run.status === "blocked" && !data.run.actionRequired?.autoResume) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (data.run.status === "blocked" && data.run.actionRequired?.autoResume) {
+        if (!resumeMutation.isPending) {
+          resumeMutation.mutate();
+        }
+        return;
+      }
+
       if (!advanceMutation.isPending) {
         advanceMutation.mutate();
       }
-    }, 3_200);
+    }, 1200);
 
-    return () => window.clearInterval(interval);
-  }, [advanceMutation, data]);
+    return () => window.clearTimeout(timer);
+  }, [
+    advanceMutation,
+    data,
+    data?.run.actionRequired?.autoResume,
+    data?.run.status,
+    data?.run.updatedAt,
+    resumeMutation,
+  ]);
 
   if (isLoading) {
     return <RunWorkspaceSkeleton />;
@@ -404,9 +735,13 @@ export function RunWorkspace({ runId }: { runId: string }) {
   }
 
   return (
-    <RunWorkspaceView
-      data={data}
-    />
+    <>
+      <RunWorkspaceView
+        data={data}
+        isResuming={resumeMutation.isPending}
+        onResume={() => resumeMutation.mutate()}
+      />
+    </>
   );
 }
 
@@ -438,10 +773,12 @@ function BoardColumn({
   title,
   tasks,
   tone,
+  blockedMessage,
 }: {
   title: string;
   tasks: RunTask[];
   tone: "amber" | "cyan" | "emerald";
+  blockedMessage?: string | null;
 }) {
   return (
     <Card
@@ -462,6 +799,11 @@ function BoardColumn({
       <CardContent className="min-h-0 flex-1 p-0 -mt-4">
         <ScrollArea className="h-full">
           <div className="space-y-3 p-4">
+            {blockedMessage ? (
+              <div className="border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+                {blockedMessage}
+              </div>
+            ) : null}
             {tasks.length === 0 ? (
               <Empty className="border-border">
                 <EmptyHeader>

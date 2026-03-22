@@ -1,24 +1,45 @@
 import type { IntakeDraft, IntakeFlowResponse } from "@/lib/intake/types";
 import type { Project, ProjectWorkspace } from "@/lib/projects/types";
 import type { RunListItem, WorkspacePayload } from "@/lib/runs/types";
+import type { RunToolPreflight } from "@/lib/tools/types";
+import { HttpError } from "@/lib/query/http-error";
 
 export const dashboardQueryKeys = {
+  notifications: {
+    all: ["notifications", "inbox"] as const,
+    preferences: ["notifications", "preferences"] as const,
+  },
   drafts: {
     all: (projectId: string) => ["drafts", projectId] as const,
     flow: (draftId: string) => ["draft-flow", draftId] as const,
+    preflight: (draftId: string) => ["draft-preflight", draftId] as const,
   },
   projects: {
-    all: ["projects"] as const,
+    all: ["projects", "active"] as const,
+    management: ["projects", "management"] as const,
     workspace: (projectId: string, threadId?: string | null) =>
       ["project-workspace", projectId, threadId ?? "latest"] as const,
   },
   runs: {
     all: (projectId: string) => ["runs", projectId] as const,
     workspace: (runId: string) => ["run-workspace", runId] as const,
+    preflight: (runId: string) => ["run-preflight", runId] as const,
+  },
+  tools: {
+    catalog: ["tools", "catalog"] as const,
+    toolkit: (toolkitSlug: string) => ["tools", "toolkit", toolkitSlug] as const,
+    internalCatalog: (projectId?: string | null) =>
+      ["tools", "internal-catalog", projectId ?? "none"] as const,
+    internalTool: (toolSlug: string, projectId?: string | null) =>
+      ["tools", "internal-tool", toolSlug, projectId ?? "none"] as const,
+    onboarding: ["tools", "onboarding"] as const,
   },
 };
 
 export const dashboardQueryTimings = {
+  notifications: {
+    staleTime: 1000 * 15,
+  },
   drafts: {
     staleTime: 1000 * 60,
   },
@@ -37,14 +58,35 @@ export const dashboardQueryTimings = {
   runWorkspace: {
     staleTime: 1000 * 15,
   },
+  tools: {
+    staleTime: 1000 * 60 * 60,
+  },
+  toolOnboarding: {
+    staleTime: 1000 * 60 * 5,
+  },
 };
 
 export async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
-  const payload = (await response.json()) as T & { error?: string };
+  const rawBody = await response.text();
+  const payload = rawBody
+    ? (() => {
+        try {
+          return JSON.parse(rawBody) as T & { error?: string };
+        } catch {
+          return { error: rawBody } as { error: string };
+        }
+      })()
+    : null;
 
   if (!response.ok) {
-    throw new Error(payload.error ?? "Request failed.");
+    throw new HttpError(
+      (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : response.statusText) || "Request failed.",
+      response.status,
+      payload,
+    );
   }
 
   return payload as T;
@@ -93,6 +135,18 @@ export function mergeRunIntoList(
   );
 }
 
+export async function fetchDraftPreflight(draftId: string) {
+  return fetchJson<RunToolPreflight | null>(`/api/intake/drafts/${draftId}/preflight`, {
+    cache: "no-store",
+  });
+}
+
+export async function fetchRunPreflight(runId: string) {
+  return fetchJson<RunToolPreflight | null>(`/api/runs/${runId}/preflight`, {
+    cache: "no-store",
+  });
+}
+
 export function upsertDraftInList(
   drafts: IntakeDraft[] | undefined,
   draft: IntakeDraft,
@@ -127,6 +181,17 @@ export function upsertProjectInList(
   return nextProjects.toSorted(
     (left, right) => getTimestamp(right.updatedAt) - getTimestamp(left.updatedAt),
   );
+}
+
+export function filterProjectsByStatus(
+  projects: Project[] | undefined,
+  statuses: Project["status"][],
+) {
+  if (!projects) {
+    return [];
+  }
+
+  return projects.filter((project) => statuses.includes(project.status));
 }
 
 export function getProjectsUpdatedAt(projects: Project[]) {

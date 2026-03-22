@@ -1,12 +1,15 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  LifeBuoyIcon,
-  SendIcon,
+  CogIcon,
   FileTextIcon,
   Footprints,
   FolderKanbanIcon,
+  Rows3Icon,
   TerminalSquareIcon,
+  WrenchIcon,
 } from "lucide-react";
+
+import { PROJECTS_ROUTE, PROJECT_ONBOARDING_ROUTE, SETTINGS_ROUTE } from "@/lib/routes";
 
 export type SidebarNavItem = {
   icon: LucideIcon;
@@ -46,14 +49,14 @@ export const protectedNavMain: SidebarNavItem[] = [
 
 export const protectedNavSecondary: SidebarNavItem[] = [
   {
-    title: "Support",
-    href: "#",
-    icon: LifeBuoyIcon,
+    title: "Projects",
+    href: PROJECTS_ROUTE,
+    icon: Rows3Icon,
   },
   {
-    title: "Feedback",
-    href: "#",
-    icon: SendIcon,
+    title: "Settings",
+    href: SETTINGS_ROUTE,
+    icon: CogIcon,
   },
 ];
 
@@ -73,6 +76,11 @@ export const protectedProjects: SidebarProjectItem[] = [
     href: "/dashboard/runs",
     icon: Footprints,
   },
+  {
+    name: "Tools",
+    href: "/dashboard/tools",
+    icon: WrenchIcon,
+  },
 ];
 
 export const protectedRouteTitles: Record<string, string> = {
@@ -80,6 +88,10 @@ export const protectedRouteTitles: Record<string, string> = {
   "/dashboard/drafts": "Drafts",
   "/dashboard/chats": "Chat",
   "/dashboard/runs": "Runs",
+  "/dashboard/tools": "Tools",
+  [PROJECTS_ROUTE]: "Projects",
+  [PROJECT_ONBOARDING_ROUTE]: "New Project",
+  [SETTINGS_ROUTE]: "Settings",
 };
 
 function formatSegment(segment: string) {
@@ -92,21 +104,26 @@ function formatSegment(segment: string) {
 
 export function getProtectedBreadcrumbs(pathname: string) {
   const segments = pathname.split("/").filter(Boolean);
-  const dashboardCrumb = {
-    href: "/dashboard",
-    title: protectedRouteTitles["/dashboard"],
-  };
-
-  if (segments.length === 0 || pathname === "/dashboard") {
-    return [dashboardCrumb];
+  if (segments.length === 0) {
+    return [];
   }
 
-  const breadcrumbs = [dashboardCrumb];
+  const rootHref = `/${segments[0]}`;
+  const rootCrumb = {
+    href: rootHref,
+    title: protectedRouteTitles[rootHref] ?? formatSegment(segments[0]),
+  };
+
+  if (segments.length === 1) {
+    return [rootCrumb];
+  }
+
+  const breadcrumbs = [rootCrumb];
 
   for (let index = 0; index < segments.length; index += 1) {
     const href = `/${segments.slice(0, index + 1).join("/")}`;
 
-    if (href === dashboardCrumb.href) {
+    if (href === rootCrumb.href) {
       continue;
     }
 

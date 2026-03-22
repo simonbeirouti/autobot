@@ -1,18 +1,22 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { usePathname } from "next/navigation";
+import { SendIcon } from "lucide-react";
 
 import { RouteBreadcrumb } from "@/app/(protected)/route-breadcrumb";
 import { AppSidebar } from "@/components/app-sidebar";
+import { FeedbackDialog } from "@/components/feedback-dialog";
+import { NotificationInbox } from "@/components/notification-inbox";
 import { useProject } from "@/components/providers/project-provider";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { PROJECT_ONBOARDING_ROUTE } from "@/lib/routes";
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { PROJECT_ONBOARDING_ROUTE } from "@/lib/routes";
 
 export function ProtectedLayoutClient({
   children,
@@ -20,20 +24,11 @@ export function ProtectedLayoutClient({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const { isLoading, projects } = useProject();
+  const { isLoading } = useProject();
+  const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
 
   const isDashboardRoute = pathname.startsWith("/dashboard");
   const isProjectOnboardingRoute = pathname === PROJECT_ONBOARDING_ROUTE;
-  const shouldRedirectToOnboarding = !isLoading && projects.length === 0 && isDashboardRoute;
-
-  useEffect(() => {
-    if (!shouldRedirectToOnboarding) {
-      return;
-    }
-
-    router.replace(PROJECT_ONBOARDING_ROUTE);
-  }, [router, shouldRedirectToOnboarding]);
 
   if (isProjectOnboardingRoute) {
     return (
@@ -41,10 +36,6 @@ export function ProtectedLayoutClient({
         {children}
       </Suspense>
     );
-  }
-
-  if (shouldRedirectToOnboarding) {
-    return <div className="min-h-svh flex-1 bg-background" />;
   }
 
   if (isDashboardRoute && isLoading) {
@@ -55,21 +46,37 @@ export function ProtectedLayoutClient({
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset className="min-h-svh overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="flex items-center gap-2 px-4">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="flex min-w-0 items-center gap-2">
             <SidebarTrigger className="-ml-1" />
             <Separator
               orientation="vertical"
               className="mr-2 data-vertical:h-4 data-vertical:self-auto"
             />
-            <Suspense fallback={null}>
-              <RouteBreadcrumb />
-            </Suspense>
+            <div className="min-w-0">
+              <Suspense fallback={null}>
+                <RouteBreadcrumb />
+              </Suspense>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <NotificationInbox />
+            <Button
+              onClick={() => setIsFeedbackDialogOpen(true)}
+              size="icon"
+              variant="outline"
+            >
+              <SendIcon className="size-4" />
+            </Button>
           </div>
         </header>
         <Suspense fallback={<div className="min-h-0 flex-1 bg-background" />}>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
         </Suspense>
+        <FeedbackDialog
+          onOpenChange={setIsFeedbackDialogOpen}
+          open={isFeedbackDialogOpen}
+        />
       </SidebarInset>
     </SidebarProvider>
   );
