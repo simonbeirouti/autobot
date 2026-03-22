@@ -4,6 +4,7 @@ import { buildAuthHref } from "@/components/auth/auth-route";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { LogOutIcon } from "lucide-react"
 import { useRouter } from "next/navigation";
 
 type LogoutButtonProps = {
@@ -16,6 +17,7 @@ type LogoutButtonProps = {
 export function LogoutButton({
   className,
   onLogout,
+  size,
   variant = "default",
 }: LogoutButtonProps) {
   const router = useRouter();
@@ -29,8 +31,8 @@ export function LogoutButton({
   };
 
   return (
-    <Button className={cn(className)} onClick={logout} variant={variant}>
-      Logout
+    <Button className={cn(className)} onClick={logout} size={size} variant={variant}>
+      <LogOutIcon />
     </Button>
   );
 }
