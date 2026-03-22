@@ -21,6 +21,11 @@
       "sourceType": "github",
       "computedHash": "0be39cf8d1f315eb2fbb96850312b1a7a6a9d15d38e9bce3a17a1620572b3198"
     },
+    "gsap-react": {
+      "source": "bbeierle12/skill-mcp-claude",
+      "sourceType": "github",
+      "computedHash": "772d7d58abb3b1412bf8894977ef55d4430302641747aebaab0e7cc54e8464eb"
+    },
     "langchain-dependencies": {
       "source": "langchain-ai/langchain-skills",
       "sourceType": "github",
