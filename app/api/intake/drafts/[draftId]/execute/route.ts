@@ -3,7 +3,11 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 
 import { buildInitialRunPayload } from "@/lib/agents/orchestrator";
-import { buildToolAuthActionRequired, sendRunBlockedInAppNotification } from "@/lib/runs/action-required";
+import {
+  buildToolAuthActionRequired,
+  buildToolInputActionRequired,
+  sendRunBlockedInAppNotification,
+} from "@/lib/runs/action-required";
 import type { RunActionRequired } from "@/lib/runs/types";
 import { writeLongTermMemory } from "@/lib/memory/repository";
 import { resolveCompanyKey } from "@/lib/projects/context";
@@ -21,6 +25,7 @@ import {
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildProjectToolPreflight } from "@/lib/tools/preflight";
+import { getMissingRequiredToolInputsForRunTasks } from "@/lib/tools/input-requirements";
 import { buildMissingToolkitChecklist, resolveProjectToolRuntime } from "@/lib/tools/runtime";
 
 function reindexTasks<T extends { position: number }>(tasks: T[]) {
@@ -44,6 +49,7 @@ type RunTaskRecord = {
   requiredToolIds: string[];
   executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
   toolSummary: string | null;
+  toolInput: Record<string, Record<string, unknown>>;
   actionRequired?: RunActionRequired | null;
 };
 
@@ -213,8 +219,26 @@ export async function POST(
 
     let actionRequired: RunActionRequired | null = null;
     let taskRecords: RunTaskRecord[] = initialPayload.tasks;
+    const missingToolInputs = getMissingRequiredToolInputsForRunTasks({
+      tasks: taskRecords,
+    });
 
-    if (toolPreflight.blockingToolkitSlugs.length > 0) {
+    if (missingToolInputs.length > 0) {
+      actionRequired = buildToolInputActionRequired({
+        runId: run.id,
+        requiredToolInputs: missingToolInputs,
+        blockingTaskTitle: missingToolInputs[0]?.taskTitle ?? null,
+        actionHref: `/dashboard/runs?runId=${run.id}`,
+      });
+
+      taskRecords = reindexTasks(
+        initialPayload.tasks.map((task) => ({
+          ...task,
+          status: "waiting" as const,
+          actionRequired,
+        })),
+      );
+    } else if (toolPreflight.blockingToolkitSlugs.length > 0) {
       const blockingReadiness = toolPreflight.readiness.filter((item) =>
         toolPreflight.blockingToolkitSlugs.includes(item.toolkitSlug),
       );
@@ -260,6 +284,7 @@ export async function POST(
         requiredToolIds: [] as string[],
         executionStrategy: "manual_setup" as const,
         toolSummary: item.description,
+        toolInput: {},
         actionRequired,
       }));
 

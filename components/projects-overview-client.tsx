@@ -14,6 +14,10 @@ import { toast } from "sonner";
 
 import { useProject } from "@/components/providers/project-provider";
 import {
+  DashboardPageHeader,
+  DashboardPageHeaderSkeleton,
+} from "@/components/dashboard-page-header";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -107,20 +111,7 @@ export function ProjectsOverviewSkeleton({
     <div className="relative flex min-h-full flex-1 flex-col gap-4 overflow-hidden">
       <div className="relative space-y-4">
         {showHeader ? (
-          <div className="flex flex-col gap-4 border border-border/70 p-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-2xl space-y-3">
-              <Skeleton className="h-7 w-32" />
-              <div className="space-y-2">
-                <Skeleton className="h-10 w-80" />
-                <Skeleton className="h-4 w-full max-w-2xl" />
-                <Skeleton className="h-4 w-11/12 max-w-2xl" />
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Skeleton className="h-10 w-36" />
-              <Skeleton className="h-10 w-36" />
-            </div>
-          </div>
+          <DashboardPageHeaderSkeleton showActions />
         ) : null}
 
         <div className="grid gap-4 xl:grid-cols-2">
@@ -253,7 +244,7 @@ function ProjectCard({
 export function ProjectsOverviewClient() {
   const router = useRouter();
   const { activeProjectId, setActiveProjectId } = useProject();
-  const { data, isLoading } = useManageProjectsQuery();
+  const { data, error, isFetching, isLoading } = useManageProjectsQuery();
   const updateProjectMutation = useUpdateProjectMutation();
   const [dialogState, setDialogState] = useState<ProjectActionDialogState>(null);
 
@@ -266,6 +257,14 @@ export function ProjectsOverviewClient() {
     () => projects.filter((project) => project.status === "archived"),
     [projects],
   );
+
+  if (error && !isLoading && !isFetching && !data) {
+    throw error;
+  }
+
+  if (!isLoading && !isFetching && data === undefined) {
+    throw new Error("Project data is unavailable.");
+  }
 
   function handleSwitch(project: Project) {
     setActiveProjectId(project.id);
@@ -297,31 +296,21 @@ export function ProjectsOverviewClient() {
     <>
       <section className="relative flex min-h-full flex-1 flex-col gap-4 overflow-hidden">
         <div className="relative space-y-4">
-          <div className="flex flex-col gap-4 border border-border/70 p-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-2xl space-y-3">
-              <Badge variant="outline" className="px-3 py-1 uppercase tracking-[0.2em]">
-                Project switcher
-              </Badge>
-              <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-                  Manage available workspaces
-                </h1>
-                <p className="text-sm leading-6 text-muted-foreground sm:text-base">
-                  Active projects stay in the switcher. Archived projects are hidden from daily
-                  navigation, and delete removes the project from view while keeping historical data
-                  intact for later review and training.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
+          <DashboardPageHeader
+            actions={
+              <>
               <Button asChild type="button" variant="outline">
                 <Link href={DASHBOARD_HOME_ROUTE}>Back to dashboard</Link>
               </Button>
               <Button asChild type="button">
                 <Link href={PROJECT_ONBOARDING_ROUTE}>Create project</Link>
               </Button>
-            </div>
-          </div>
+              </>
+            }
+            badge="Project switcher"
+            description="Active projects stay in the switcher. Archived projects are hidden from daily navigation, and delete removes the project from view while keeping historical data intact for later review and training."
+            heading="Manage available workspaces"
+          />
 
           {isLoading ? (
             <ProjectsOverviewSkeleton showHeader={false} />

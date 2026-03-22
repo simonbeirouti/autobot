@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  SendIcon,
+  CogIcon,
   FileTextIcon,
   Footprints,
   FolderKanbanIcon,
@@ -9,10 +9,9 @@ import {
   WrenchIcon,
 } from "lucide-react";
 
-import { PROJECTS_ROUTE } from "@/lib/routes";
+import { PROJECTS_ROUTE, PROJECT_ONBOARDING_ROUTE, SETTINGS_ROUTE } from "@/lib/routes";
 
 export type SidebarNavItem = {
-  action?: "feedback-dialog";
   icon: LucideIcon;
   isActive?: boolean;
   items?: {
@@ -55,10 +54,9 @@ export const protectedNavSecondary: SidebarNavItem[] = [
     icon: Rows3Icon,
   },
   {
-    title: "Feedback",
-    href: "#",
-    icon: SendIcon,
-    action: "feedback-dialog",
+    title: "Settings",
+    href: SETTINGS_ROUTE,
+    icon: CogIcon,
   },
 ];
 
@@ -91,9 +89,9 @@ export const protectedRouteTitles: Record<string, string> = {
   "/dashboard/chats": "Chat",
   "/dashboard/runs": "Runs",
   "/dashboard/tools": "Tools",
-  "/projects": "Projects",
-  "/projects/new": "New Project",
-  "/settings": "Settings",
+  [PROJECTS_ROUTE]: "Projects",
+  [PROJECT_ONBOARDING_ROUTE]: "New Project",
+  [SETTINGS_ROUTE]: "Settings",
 };
 
 function formatSegment(segment: string) {

@@ -19,6 +19,11 @@ import {
   buildProjectToolPreflight,
   resolveProjectToolPlanningTasks,
 } from "@/lib/tools/preflight";
+import {
+  applyAnsweredToolInputQuestions,
+  buildMissingToolInputQuestions,
+  withInferredToolInputs,
+} from "@/lib/tools/input-requirements";
 import { resolveProjectTools } from "@/lib/tools/resolver";
 import { resolveProjectToolRuntime } from "@/lib/tools/runtime";
 
@@ -105,8 +110,8 @@ export async function POST(request: Request) {
       questions: result.questions.map((question) => question.prompt),
     });
 
-    const isReviewReady = result.status === "ready_to_execute";
-    const taskDrafts = isReviewReady
+    const isPlannerReady = result.status === "ready_to_execute";
+    const taskDrafts = isPlannerReady
       ? (
           await resolveProjectToolPlanningTasks(supabase, {
             userId: user.sub,
@@ -132,23 +137,36 @@ export async function POST(request: Request) {
           optionalToolkitSlugs: task.optionalToolkitSlugs,
         }))
       : result.tasks;
+    const taskDraftsWithInput = applyAnsweredToolInputQuestions({
+      tasks: withInferredToolInputs({
+        objective: payload.objective,
+        tasks: taskDrafts,
+      }),
+      questions: [],
+    });
+    const missingToolInputQuestions =
+      isPlannerReady ? buildMissingToolInputQuestions({ tasks: taskDraftsWithInput }) : [];
+    const isReviewReady = isPlannerReady && missingToolInputQuestions.length === 0;
     const savedQuestions = await replaceIntakeQuestions(supabase, {
       draftId: draft.id,
-      questions: result.questions,
+      questions: [...result.questions, ...missingToolInputQuestions],
     });
     const savedDraft = await updateIntakeDraft(supabase, {
       draftId: draft.id,
       userId: user.sub,
       patch: {
         status: isReviewReady ? "review_ready" : "collecting_input",
-        clarificationSummary: result.summary,
+        clarificationSummary:
+          missingToolInputQuestions.length > 0
+            ? `${result.summary}\n\nAutoBot needs a few missing tool details before the draft is ready to execute.`
+            : result.summary,
         executionMode: result.executionMode,
         confidenceToProceed: result.confidenceToProceed,
         currentStep: 0,
-        questionCount: result.questions.length,
+        questionCount: result.questions.length + missingToolInputQuestions.length,
         generatedMarkdown: result.draftMarkdown || null,
         draftMarkdown: result.draftMarkdown || null,
-        taskDrafts,
+        taskDrafts: taskDraftsWithInput,
         eventNarrative: result.eventNarrative,
         lastGeneratedAt: isReviewReady ? new Date().toISOString() : null,
       },

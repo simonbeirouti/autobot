@@ -8,6 +8,7 @@ import {
   updateIntakeQuestionAnswers,
 } from "@/lib/intake/repository";
 import type { IntakeFlowResponse } from "@/lib/intake/types";
+import { isSupabaseRowNotFoundError } from "@/lib/supabase/errors";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { buildProjectToolPreflight } from "@/lib/tools/preflight";
@@ -70,6 +71,10 @@ export async function GET(
     };
     return NextResponse.json(response);
   } catch (error) {
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to load draft." },
       { status: 500 },
@@ -134,6 +139,10 @@ export async function PATCH(
     const response: IntakeFlowResponse = { draft, questions, toolPreflight };
     return NextResponse.json(response);
   } catch (error) {
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Draft not found." }, { status: 404 });
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to update draft." },
       { status: 500 },

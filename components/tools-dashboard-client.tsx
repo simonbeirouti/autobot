@@ -18,7 +18,7 @@ import {
   ShieldCheckIcon,
   XCircleIcon,
 } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { notFound, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -55,6 +55,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspaceSidebarPanel } from "@/components/workspace-layout";
 import { dashboardQueryKeys, dashboardQueryTimings, fetchJson } from "@/lib/query/dashboard";
+import { ensureRouteData, isNotFoundError } from "@/lib/query/http-error";
 import type {
   ComposioToolCatalog,
   ComposioToolDetailRecord,
@@ -403,13 +404,65 @@ function getInternalToolSampleInput(toolSlug: string) {
         resultLimit: 5,
         includeMemory: true,
       };
+    case "sitemap_robots_audit":
+      return {
+        siteUrl: "https://example.com",
+        includeChildSitemaps: true,
+        sitemapLimit: 5,
+      };
+    case "table_query":
+      return {
+        csvContent: "company,visits,region\nAcme,42,APAC\nBeta,17,EMEA\nAcme,30,APAC",
+        operation: "group_count",
+        groupBy: "company",
+        rowLimit: 10,
+      };
+    case "serp_snapshot":
+      return {
+        query: "best llm observability platforms",
+        domainFilters: [],
+        resultLimit: 5,
+      };
+    case "competitor_compare":
+      return {
+        urls: ["https://example.com", "https://example.org"],
+        comparisonFocus: "homepage messaging and calls to action",
+        resultLimit: 2,
+      };
+    case "content_inventory":
+      return {
+        rootUrl: "https://example.com",
+        pageLimit: 5,
+        depthLimit: 1,
+        stayWithinPath: true,
+        thinContentThreshold: 250,
+      };
+    case "report_writer":
+      return {
+        title: "Internal tool smoke test report",
+        reportType: "analysis_report",
+        summary: "A short summary created from the tools dashboard.",
+        findings: [
+          {
+            title: "Example finding",
+            detail: "This is a sample finding included in the generated report.",
+          },
+        ],
+        sections: [
+          {
+            heading: "Recommendation",
+            body: "Turn this into a reusable report artifact for the project.",
+          },
+        ],
+        writeMemorySummary: false,
+      };
     default:
       return {};
   }
 }
 
 function toolNeedsProjectContext(toolSlug: string) {
-  return toolSlug === "artifact_store" || toolSlug === "site_crawler" || toolSlug === "document_search";
+  return ["artifact_store", "site_crawler", "document_search", "report_writer"].includes(toolSlug);
 }
 
 export function ToolsDashboardSkeleton() {
@@ -1050,18 +1103,6 @@ export function ToolsDashboardClient({
   }
 
   useEffect(() => {
-    if (openToolkitSlug && !toolkitOptions.some((toolkit) => toolkit.slug === openToolkitSlug)) {
-      setOpenToolkitSlug("");
-    }
-  }, [openToolkitSlug, toolkitOptions]);
-
-  useEffect(() => {
-    if (openInternalToolSlug && !internalToolOptions.some((tool) => tool.slug === openInternalToolSlug)) {
-      setOpenInternalToolSlug("");
-    }
-  }, [internalToolOptions, openInternalToolSlug]);
-
-  useEffect(() => {
     if (!selectedInternalTool) {
       return;
     }
@@ -1097,6 +1138,65 @@ export function ToolsDashboardClient({
       );
     });
   }, [connectionResult, openInternalToolSlug, openToolkitSlug, pathname, queryClient, router, toolSourceTab]);
+
+  if (catalogQuery.error && !catalogQuery.isLoading && !catalogQuery.isFetching && !catalog) {
+    throw catalogQuery.error;
+  }
+
+  if (
+    internalCatalogQuery.error &&
+    !internalCatalogQuery.isLoading &&
+    !internalCatalogQuery.isFetching &&
+    !internalCatalog
+  ) {
+    if (isNotFoundError(internalCatalogQuery.error)) {
+      notFound();
+    }
+
+    throw internalCatalogQuery.error;
+  }
+
+  if (openToolkitSlug && catalog && !selectedToolkit) {
+    notFound();
+  }
+
+  if (openInternalToolSlug && internalCatalog && !selectedInternalTool) {
+    notFound();
+  }
+
+  if (
+    toolsQuery.error &&
+    !toolsQuery.isLoading &&
+    !toolsQuery.isFetching &&
+    !toolsQuery.data
+  ) {
+    if (isNotFoundError(toolsQuery.error)) {
+      notFound();
+    }
+
+    throw toolsQuery.error;
+  }
+
+  if (
+    internalToolQuery.error &&
+    !internalToolQuery.isLoading &&
+    !internalToolQuery.isFetching &&
+    !internalToolQuery.data
+  ) {
+    if (isNotFoundError(internalToolQuery.error)) {
+      notFound();
+    }
+
+    throw internalToolQuery.error;
+  }
+
+  if (openToolkitSlug && !toolsQuery.isLoading && !toolsQuery.isFetching) {
+    ensureRouteData(toolsQuery.data, "Tool details are unavailable.");
+  }
+
+  if (openInternalToolSlug && !internalToolQuery.isLoading && !internalToolQuery.isFetching) {
+    ensureRouteData(internalToolQuery.data, "Internal tool details are unavailable.");
+  }
 
   if (catalogQuery.isLoading) {
     return <ToolsDashboardSkeleton />;
@@ -1289,7 +1389,7 @@ export function ToolsDashboardClient({
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {internalCatalogQuery.isLoading || isProjectLoading ? (
-                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {Array.from({ length: 5 }).map((_, index) => (
                     <div className="border bg-card p-4" key={index}>
                       <Skeleton className="h-5 w-36" />
@@ -1313,7 +1413,7 @@ export function ToolsDashboardClient({
                     </div>
                   </div>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {internalToolOptions.map((tool) => {
                     const statusMeta = getInternalToolStatusMeta(tool);
 

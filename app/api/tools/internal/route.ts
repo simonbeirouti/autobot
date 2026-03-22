@@ -12,6 +12,7 @@ import {
 import { resolveCompanyKey } from "@/lib/projects/context";
 import { fetchProject } from "@/lib/projects/repository";
 import type { InternalToolCatalog } from "@/lib/tools/types";
+import { isSupabaseRowNotFoundError } from "@/lib/supabase/errors";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -81,6 +82,10 @@ export async function GET(request: Request) {
       },
     );
   } catch (error) {
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
+
     return NextResponse.json(
       {
         error:

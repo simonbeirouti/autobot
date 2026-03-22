@@ -6,6 +6,7 @@ import { advanceRunExecution } from "@/lib/agents/orchestrator";
 import {
   applyActionRequiredToTasks,
   buildToolAuthActionRequired,
+  buildToolInputActionRequired,
   isManualPauseActionRequired,
   isRunAwaitingUserAction,
   resolveRunAttentionNotification,
@@ -26,6 +27,7 @@ import {
   executeToolAssistedPrompt,
   resolveProjectToolRuntime,
 } from "@/lib/tools/runtime";
+import { getMissingRequiredToolInputsForRunTasks } from "@/lib/tools/input-requirements";
 import { buildToolPreflightFromReadiness } from "@/lib/tools/preflight";
 import type { ResolvedProjectToolRuntime, ToolkitReadinessItem } from "@/lib/tools/types";
 
@@ -151,6 +153,7 @@ function createSetupTasks(params: {
     requiredToolIds: [],
     executionStrategy: "manual_setup" as const,
     toolSummary: item.description,
+    toolInput: {},
     actionRequired: params.actionRequired,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -510,6 +513,61 @@ export async function advanceRunWorkspace(params: {
       ];
     } else if (
       effectiveExecutionStrategy === "tool_execution" &&
+      getMissingRequiredToolInputsForRunTasks({
+        tasks: [startedTask],
+      }).length > 0
+    ) {
+      const missingToolInputs = getMissingRequiredToolInputsForRunTasks({
+        tasks: [startedTask],
+      });
+
+      console.log("[runs.advance] blocking on missing tool inputs", {
+        runId: currentWorkspace.run.id,
+        taskTitle: startedTask.title,
+        missingToolInputs,
+      });
+
+      nextActionRequired = await maybeNotifyBlockedRun({
+        supabase: params.supabase,
+        userId: params.user.sub,
+        objective: currentWorkspace.run.objective,
+        runId: currentWorkspace.run.id,
+        currentActionRequired: currentWorkspace.run.actionRequired,
+        nextActionRequired: buildToolInputActionRequired({
+          runId: currentWorkspace.run.id,
+          requiredToolInputs: missingToolInputs,
+          blockingTaskTitle: startedTask.title,
+          actionHref: `/dashboard/runs?runId=${currentWorkspace.run.id}`,
+        }),
+      });
+
+      nextTasks = reindexTasks(
+        result.tasks.map((task) =>
+          task.id === startedTask.id
+            ? { ...task, status: "waiting" as const, actionRequired: nextActionRequired ?? null }
+            : { ...task, actionRequired: nextActionRequired ?? null },
+        ),
+      );
+      nextStatus = "blocked";
+      nextEvents = [
+        ...nextEvents,
+        createRunEvent(
+          currentWorkspace.run.id,
+          "system",
+          `Blocked pending task details for "${startedTask.title}".`,
+          { taskId: startedTask.id },
+        ),
+      ];
+      nextUsage = [
+        ...nextUsage,
+        createUsageRecord(
+          currentWorkspace.run.id,
+          "tool_input_blocked",
+          "Run blocked until the required tool inputs are provided.",
+        ),
+      ];
+    } else if (
+      effectiveExecutionStrategy === "tool_execution" &&
       taskRuntimeCandidates.length > 0
     ) {
       console.log("[runs.advance] executing tool-backed task", {
@@ -550,6 +608,9 @@ export async function advanceRunWorkspace(params: {
           `Project: ${project.name}.`,
           objective ? `Objective: ${objective.title}.` : "",
           startedTask.toolSummary ?? "",
+          Object.keys(startedTask.toolInput ?? {}).length > 0
+            ? `Use these provided tool inputs when applicable: ${JSON.stringify(startedTask.toolInput)}.`
+            : "",
           preferredToolkitSlugs.length > 0
             ? `Prefer these toolkits: ${preferredToolkitSlugs.join(", ")}.`
             : "Use connected tools when they materially help complete this task.",
@@ -563,6 +624,7 @@ export async function advanceRunWorkspace(params: {
           ...toolRuntime,
           toolCandidates: taskRuntimeCandidates,
         },
+        prefilledToolInputs: startedTask.toolInput,
         onEvent: (event) => {
           if (event.type === "tool_confirmation_required") {
             confirmationRequired = true;

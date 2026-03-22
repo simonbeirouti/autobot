@@ -24,6 +24,7 @@ import {
 import { useDelayedVisibility } from "@/lib/query/use-delayed-visibility";
 import type { IntakeDraft, IntakeFlowResponse } from "@/lib/intake/types";
 import { cn } from "@/lib/utils";
+import { buildAuthHref } from "@/components/auth/auth-route";
 
 const starterPrompts = [
   "Launch an AI assistant for our SDR team that can qualify inbound leads.",
@@ -220,7 +221,7 @@ export function ObjectiveIntake({
             {error.toLowerCase().includes("authentication") ? (
               <>
                 {" "}
-                <Link className="underline underline-offset-4" href="/auth/login">
+                <Link className="underline underline-offset-4" href={buildAuthHref("login")}>
                   Sign in
                 </Link>
                 {" "}to continue.

@@ -26,6 +26,10 @@ export const clarificationTaskSchema = z.object({
     .optional()
     .default("analysis_only"),
   toolSummary: z.string().max(240).optional().default(""),
+  toolInput: z
+    .record(z.string(), z.record(z.string(), z.unknown()))
+    .optional()
+    .default({}),
 });
 
 export const clarificationQuestionOptionSchema = z.object({

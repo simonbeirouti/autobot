@@ -56,6 +56,7 @@ import {
   getRunsUpdatedAt,
   mergeRunIntoList,
 } from "@/lib/query/dashboard";
+import { isNotFoundError } from "@/lib/query/http-error";
 import { useDelayedVisibility } from "@/lib/query/use-delayed-visibility";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -102,6 +103,20 @@ async function stopRun(runId: string) {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "stop" }),
+  });
+}
+
+async function submitRunToolInputs(
+  runId: string,
+  inputs: Array<{ taskId: string; toolkitSlug: string; field: string; value: string }>,
+) {
+  return fetchJson<WorkspacePayload>(`/api/runs/${runId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "submit_tool_inputs",
+      inputs,
+    }),
   });
 }
 
@@ -318,10 +333,12 @@ export function RunsDashboardClient({
   const hasRunsLoadError =
     Boolean(runsQuery.error) && !runsQuery.isLoading && !runsQuery.isFetching;
   const showRunsError = useDelayedVisibility(hasRunsLoadError, ERROR_VISIBILITY_DELAY_MS);
-  const selectedRunId =
-    requestedRunId && runs.some((run) => run.id === requestedRunId)
+  const hasRequestedRun = requestedRunId ? runs.some((run) => run.id === requestedRunId) : false;
+  const selectedRunId = requestedRunId
+    ? hasRequestedRun
       ? requestedRunId
-      : initialSelectedRunId ?? runs[0]?.id ?? null;
+      : null
+    : initialSelectedRunId ?? runs[0]?.id ?? null;
   const deferredRunId = useDeferredValue(selectedRunId);
 
   useEffect(() => {
@@ -444,6 +461,31 @@ export function RunsDashboardClient({
       toast.error(error instanceof Error ? error.message : "Unable to stop run.");
     },
   });
+  const toolInputMutation = useMutation({
+    mutationFn: ({
+      runId,
+      inputs,
+    }: {
+      runId: string;
+      inputs: Array<{ taskId: string; toolkitSlug: string; field: string; value: string }>;
+    }) => submitRunToolInputs(runId, inputs),
+    onSuccess: (workspace) => {
+      queryClient.setQueryData(dashboardQueryKeys.runs.workspace(workspace.run.id), workspace);
+      if (activeProjectId) {
+        queryClient.setQueryData<RunListItem[] | undefined>(
+          dashboardQueryKeys.runs.all(activeProjectId),
+          (currentRuns) => mergeRunIntoList(currentRuns, workspace),
+        );
+      }
+      queryClient.invalidateQueries({
+        queryKey: dashboardQueryKeys.notifications.all,
+      });
+      toast.success("Saved task details.");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Unable to save task details.");
+    },
+  });
   const deleteMutation = useMutation({
     mutationFn: (runId: string) => deleteRun(runId),
     onSuccess: async ({ runId }) => {
@@ -498,6 +540,38 @@ export function RunsDashboardClient({
       : selectedRun
         ? getRunSummary(selectedRun)
         : null;
+
+  if (runsQuery.error && !runsQuery.isLoading && !runsQuery.isFetching && !runsQuery.data) {
+    throw runsQuery.error;
+  }
+
+  const isMissingRequestedRun =
+    Boolean(
+      requestedRunId &&
+      activeProject &&
+      !runsQuery.isLoading &&
+      !runsQuery.isFetching &&
+      !runsQuery.error &&
+      !hasRequestedRun,
+    ) ||
+    Boolean(
+      selectedRunId &&
+      workspaceQuery.error &&
+      !workspaceQuery.isLoading &&
+      !workspaceQuery.isFetching &&
+      !workspaceQuery.data &&
+      isNotFoundError(workspaceQuery.error),
+    );
+
+  if (
+    workspaceQuery.error &&
+    !workspaceQuery.isLoading &&
+    !workspaceQuery.isFetching &&
+    !workspaceQuery.data &&
+    !isNotFoundError(workspaceQuery.error)
+  ) {
+    throw workspaceQuery.error;
+  }
 
   const handleSelectRun = (runId: string) => {
     startTransition(() => {
@@ -711,6 +785,32 @@ export function RunsDashboardClient({
           </Card>
         ) : !selectedRunId && (isRestoring || runsQuery.isLoading) ? (
           <RunWorkspaceSkeleton />
+        ) : isMissingRequestedRun ? (
+          <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
+            <CardContent className="flex h-full items-center justify-center py-0">
+              <Empty className="max-w-md border-border">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FootprintsIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>Run not found</EmptyTitle>
+                  <EmptyDescription>
+                    This run is no longer available. Choose another run from the list or go back to the runs view.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <Button
+                  onClick={() => {
+                    startTransition(() => {
+                      router.replace(pathname, { scroll: false });
+                    });
+                  }}
+                  type="button"
+                >
+                  Back to runs
+                </Button>
+              </Empty>
+            </CardContent>
+          </Card>
         ) : !selectedRunId ? (
           <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
             <CardContent className="flex h-full items-center justify-center py-0">
@@ -745,6 +845,14 @@ export function RunsDashboardClient({
                 data={workspaceQuery.data}
                 isResuming={resumeMutation.isPending}
                 onResume={() => resumeMutation.mutate(selectedRunId ?? undefined)}
+                isSubmittingToolInputs={toolInputMutation.isPending}
+                onSubmitToolInputs={(inputs) => {
+                  if (!selectedRunId) {
+                    return;
+                  }
+
+                  toolInputMutation.mutate({ runId: selectedRunId, inputs });
+                }}
               />
               {workspaceQuery.data.toolPreflight ? (
                 <ToolConnectModal

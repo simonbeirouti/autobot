@@ -4,15 +4,36 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProviders } from "@/components/providers/app-providers";
 import { Toaster } from "@/components/ui/sonner";
-
-const defaultUrl = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
+import { seoDefaults } from "@/lib/seo";
+import { getSiteUrl } from "@/lib/site-url";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(defaultUrl),
-  title: "AutoBot",
-  description: "The fastest way to build apps with AutoBot",
+  metadataBase: new URL(getSiteUrl()),
+  title: {
+    default: seoDefaults.siteName,
+    template: `%s | ${seoDefaults.siteName}`,
+  },
+  description: seoDefaults.defaultDescription,
+  applicationName: seoDefaults.siteName,
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    siteName: seoDefaults.siteName,
+    type: "website",
+    locale: "en_US",
+    title: seoDefaults.siteName,
+    description: seoDefaults.defaultDescription,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: seoDefaults.siteName,
+    description: seoDefaults.defaultDescription,
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({

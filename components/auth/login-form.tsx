@@ -16,6 +16,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DASHBOARD_HOME_ROUTE } from "@/lib/routes";
+import { buildAuthHref } from "@/components/auth/auth-route";
+import { buildAuthErrorHref, getAuthFlowError } from "@/components/auth/auth-error";
 
 export function LoginForm({
   className,
@@ -42,7 +44,13 @@ export function LoginForm({
       router.push(DASHBOARD_HOME_ROUTE);
       router.refresh();
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
+      const authError = getAuthFlowError(error, "login");
+      if (authError.code === "invalid-credentials") {
+        setError("Incorrect email or password. Try again or reset your password.");
+        return;
+      }
+
+      router.push(buildAuthErrorHref(authError.code, authError.message));
     } finally {
       setIsLoading(false);
     }
@@ -75,7 +83,7 @@ export function LoginForm({
                 <div className="flex items-center">
                   <Label htmlFor="password">Password</Label>
                   <Link
-                    href="/auth/forgot-password"
+                    href={buildAuthHref("forgot-password")}
                     className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
                   >
                     Forgot your password?
@@ -96,10 +104,7 @@ export function LoginForm({
             </div>
             <div className="mt-4 text-center text-sm">
               Don&apos;t have an account?{" "}
-              <Link
-                href="/auth/sign-up"
-                className="underline underline-offset-4"
-              >
+              <Link href={buildAuthHref("sign-up")} className="underline underline-offset-4">
                 Sign up
               </Link>
             </div>

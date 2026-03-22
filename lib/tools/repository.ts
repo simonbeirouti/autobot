@@ -366,7 +366,19 @@ export async function fetchInternalToolDefinitions(supabase: SupabaseClient) {
 export async function fetchInternalToolDefinitionsWithFallback(supabase: SupabaseClient) {
   try {
     const definitions = await fetchInternalToolDefinitions(supabase);
-    return definitions.length > 0 ? definitions : getFallbackInternalToolDefinitions();
+    if (definitions.length === 0) {
+      return getFallbackInternalToolDefinitions();
+    }
+
+    const mergedDefinitions = new Map(
+      getFallbackInternalToolDefinitions().map((definition) => [definition.slug, definition]),
+    );
+
+    for (const definition of definitions) {
+      mergedDefinitions.set(definition.slug, definition);
+    }
+
+    return Array.from(mergedDefinitions.values());
   } catch {
     return getFallbackInternalToolDefinitions();
   }

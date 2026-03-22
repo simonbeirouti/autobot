@@ -11,12 +11,30 @@ import {
   syncRunTasks,
   updateRunStatus,
 } from "@/lib/runs/repository";
+import { isSupabaseRowNotFoundError } from "@/lib/supabase/errors";
+import {
+  getMissingRequiredToolInputsForRunTasks,
+  mergeToolInputValuesIntoRunTasks,
+} from "@/lib/tools/input-requirements";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
-const updateRunSchema = z.object({
-  action: z.enum(["stop"]),
-});
+const updateRunSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("stop"),
+  }),
+  z.object({
+    action: z.literal("submit_tool_inputs"),
+    inputs: z.array(
+      z.object({
+        taskId: z.string().uuid(),
+        toolkitSlug: z.string().min(1),
+        field: z.string().min(1),
+        value: z.string().trim().min(1),
+      }),
+    ),
+  }),
+]);
 
 export async function GET(
   _request: Request,
@@ -46,6 +64,10 @@ export async function GET(
       },
     });
   } catch (error) {
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Run not found." }, { status: 404 });
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to load run." },
       { status: 500 },
@@ -99,6 +121,37 @@ export async function PATCH(
       return NextResponse.json(nextWorkspace);
     }
 
+    if (body.action === "submit_tool_inputs") {
+      const updatedTasks = mergeToolInputValuesIntoRunTasks({
+        tasks: workspace.tasks,
+        inputs: body.inputs,
+      });
+      const remainingMissingInputs = getMissingRequiredToolInputsForRunTasks({
+        tasks: updatedTasks,
+      });
+
+      await syncRunTasks(supabase, {
+        runId,
+        tasks: updatedTasks.map((task) => ({
+          ...task,
+          actionRequired:
+            remainingMissingInputs.length > 0 ? task.actionRequired : null,
+        })),
+      });
+
+      if (remainingMissingInputs.length === 0 && workspace.run.actionRequired?.reason === "tool_inputs_missing") {
+        await updateRunStatus(supabase, {
+          runId,
+          userId: user.sub,
+          status: "ready",
+          actionRequired: null,
+        });
+      }
+
+      const nextWorkspace = await fetchWorkspace(supabase, { runId, userId: user.sub });
+      return NextResponse.json(nextWorkspace);
+    }
+
     return NextResponse.json({ error: "Unsupported run action." }, { status: 400 });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -106,6 +159,10 @@ export async function PATCH(
         { error: "Invalid run action.", issues: error.flatten() },
         { status: 400 },
       );
+    }
+
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Run not found." }, { status: 404 });
     }
 
     return NextResponse.json(

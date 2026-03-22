@@ -4,7 +4,7 @@
 
 This document captures what has been completed for the mixed internal-tools and Composio integration, where the integration currently applies in the product, and how to manually verify the end-to-end behavior.
 
-This is based on the current codebase as of March 21, 2026. The previously referenced planning docs are not present in this workspace, so this document reflects the implemented system rather than an external source-of-truth plan.
+This is based on the current codebase as of March 22, 2026. The previously referenced planning docs are not present in this workspace, so this document reflects the implemented system rather than an external source-of-truth plan.
 
 ## What Has Been Completed
 
@@ -27,6 +27,12 @@ This is based on the current codebase as of March 21, 2026. The previously refer
   - `site_crawler`
   - `document_search`
   - `artifact_store`
+  - `sitemap_robots_audit`
+  - `table_query`
+  - `serp_snapshot`
+  - `competitor_compare`
+  - `content_inventory`
+  - `report_writer`
 - Internal custom tools now support an HTTP-backed executor path.
 - Write-gated tools continue to require confirmation before execution.
 - Tool invocations are logged for success, failure, and confirmation-required outcomes.
@@ -100,6 +106,7 @@ These are not blockers for current QA, but they are useful to remember:
 
 - The referenced planning docs are missing from this workspace, so this document should be treated as the active handoff note.
 - The broader first-party roadmap items beyond the current built-ins are not covered here.
+- `task_handoff` is still not implemented as a first-party built-in because it needs a real downstream adapter and approval surface.
 - Manual validation is still important for real-world prompt quality and task-shaping behavior, especially around optional vs required tool selection.
 
 ## Manual Test Setup
@@ -114,6 +121,12 @@ Before running the scenarios below:
   - `site_crawler`
   - `document_search`
   - `artifact_store`
+  - `sitemap_robots_audit`
+  - `table_query`
+  - `serp_snapshot`
+  - `competitor_compare`
+  - `content_inventory`
+  - `report_writer`
 - For custom-tool tests, ensure at least one `internal_custom` tool exists through the admin management path.
 
 ## Manual Test Scenarios

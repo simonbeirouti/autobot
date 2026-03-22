@@ -432,7 +432,10 @@ function shouldIncludeInternalTool(params: {
       .some((term) => haystack.includes(term));
   }
 
-  if (params.definition.slug === "web_search" && !isWebSearchConfigured()) {
+  if (
+    ["web_search", "serp_snapshot"].includes(params.definition.slug) &&
+    !isWebSearchConfigured()
+  ) {
     return false;
   }
 
@@ -450,6 +453,30 @@ function shouldIncludeInternalTool(params: {
 
   if (params.definition.slug === "document_search") {
     return /document|asset|brief|notes|memory|file|pdf|csv|content/i.test(params.query);
+  }
+
+  if (params.definition.slug === "sitemap_robots_audit") {
+    return /robots|sitemap|indexability|crawl budget|blocked/i.test(params.query);
+  }
+
+  if (params.definition.slug === "table_query") {
+    return /table|csv|json|dataset|rows|columns|group|filter|count/i.test(params.query);
+  }
+
+  if (params.definition.slug === "serp_snapshot") {
+    return /serp|search landscape|ranking|snapshot|top results/i.test(params.query);
+  }
+
+  if (params.definition.slug === "competitor_compare") {
+    return /competitor|compare|messaging|positioning|cta|benchmark/i.test(params.query);
+  }
+
+  if (params.definition.slug === "content_inventory") {
+    return /inventory|duplicate|thin pages|content gap|site pages|content audit/i.test(params.query);
+  }
+
+  if (params.definition.slug === "report_writer") {
+    return /report|memo|write up|deliverable|summary document/i.test(params.query);
   }
 
   return scoreQueryMatch(params.query, params.definition.tags, params.definition.capabilities) > 0;
@@ -821,6 +848,7 @@ export function createLangChainTools(params: {
   supabase: SupabaseClient;
   context: ToolRuntimeContext;
   candidates: ResolvedToolCandidate[];
+  prefilledToolInputs?: Record<string, Record<string, unknown>>;
   onEvent?: (event: ToolRuntimeEvent) => void;
 }): DynamicStructuredTool[] {
   return params.candidates.map((candidate) =>
@@ -830,12 +858,16 @@ export function createLangChainTools(params: {
           input && typeof input === "object" && !Array.isArray(input)
             ? (input as Record<string, unknown>)
             : {};
+        const mergedPayload = {
+          ...(params.prefilledToolInputs?.[candidate.toolkitSlug] ?? {}),
+          ...payload,
+        };
 
         const result = await executeResolvedTool({
           supabase: params.supabase,
           context: params.context,
           candidate,
-          input: payload,
+          input: mergedPayload,
           onEvent: params.onEvent,
         });
 
@@ -899,6 +931,7 @@ export async function executeToolAssistedPrompt(params: {
   systemPrompt: string;
   userMessage: string;
   runtime: ResolvedProjectToolRuntime;
+  prefilledToolInputs?: Record<string, Record<string, unknown>>;
   onEvent?: (event: ToolRuntimeEvent) => void;
 }) {
   const model = getConfiguredChatModel();
@@ -914,6 +947,7 @@ export async function executeToolAssistedPrompt(params: {
     supabase: params.supabase,
     context: params.context,
     candidates: params.runtime.toolCandidates.slice(0, 6),
+    prefilledToolInputs: params.prefilledToolInputs,
     onEvent: params.onEvent,
   });
   const boundModel = model.bindTools(tools);

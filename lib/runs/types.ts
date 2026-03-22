@@ -25,9 +25,22 @@ export type UsageStatus = (typeof USAGE_STATUSES)[number];
 export type ExecutionMode = "single_agent" | "multi_agent";
 export type RunActionRequiredKind =
   | "tool_authentication"
+  | "tool_input"
   | "manual_setup"
   | "tool_confirmation"
   | "manual_pause";
+
+export type RequiredToolInput = {
+  taskId: string | null;
+  taskTitle: string;
+  toolkitSlug: string;
+  field: string;
+  label: string;
+  prompt: string;
+  helpText: string;
+  placeholder: string;
+  value: string;
+};
 
 export type RunActionRequired = {
   kind: RunActionRequiredKind;
@@ -44,6 +57,7 @@ export type RunActionRequired = {
   resumeLabel: string | null;
   canResume: boolean;
   autoResume: boolean;
+  requiredToolInputs: RequiredToolInput[];
   notifiedAt: string | null;
   emailFallbackAt: string | null;
   emailEscalatedAt: string | null;
@@ -94,6 +108,7 @@ export type RunTask = {
   requiredToolIds: string[];
   executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
   toolSummary: string | null;
+  toolInput: Record<string, Record<string, unknown>>;
   actionRequired: RunActionRequired | null;
   createdAt: string;
   updatedAt: string;

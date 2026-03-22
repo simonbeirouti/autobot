@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { fetchProjectWorkspace, updateProject } from "@/lib/projects/repository";
+import { isSupabaseRowNotFoundError } from "@/lib/supabase/errors";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -34,6 +35,10 @@ export async function GET(
       },
     });
   } catch (error) {
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to load project." },
       { status: 500 },
@@ -70,6 +75,10 @@ export async function PATCH(
 
     return NextResponse.json(project);
   } catch (error) {
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to update project." },
       { status: 500 },

@@ -389,6 +389,7 @@ function createTaskDraft(task: {
     requiredToolIds: [],
     executionStrategy: "analysis_only",
     toolSummary: "",
+    toolInput: {},
   };
 }
 
@@ -971,6 +972,7 @@ export function buildInitialRunPayload(params: {
       toolRequirement: task.toolRequirement ?? "none",
       executionStrategy: task.executionStrategy ?? "analysis_only",
       toolSummary: task.toolSummary || null,
+      toolInput: task.toolInput ?? {},
     };
   });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
@@ -15,6 +15,16 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
 import {
   Accordion,
@@ -142,6 +152,7 @@ function buildFallbackActionRequired(data: WorkspacePayload): RunActionRequired 
     resumeLabel: "Resume run",
     canResume: false,
     autoResume: true,
+    requiredToolInputs: [],
     notifiedAt: null,
     emailFallbackAt: null,
     emailEscalatedAt: null,
@@ -382,11 +393,22 @@ export function RunWorkspaceView({
   data,
   isResuming = false,
   onResume,
+  onSubmitToolInputs,
+  isSubmittingToolInputs = false,
 }: {
   data: WorkspacePayload;
   isResuming?: boolean;
   onResume?: (() => void) | undefined;
+  onSubmitToolInputs?: (inputs: Array<{
+    taskId: string;
+    toolkitSlug: string;
+    field: string;
+    value: string;
+  }>) => void;
+  isSubmittingToolInputs?: boolean;
 }) {
+  const [toolInputDialogOpen, setToolInputDialogOpen] = useState(false);
+  const [toolInputValues, setToolInputValues] = useState<Record<string, string>>({});
   const taskColumns = groupTasks(data.tasks);
   const handoffCount = data.usage.filter((item) => item.category === "agent_handoff").length;
   const toolCount = data.usage.filter((item) => item.category === "tool").length;
@@ -395,6 +417,21 @@ export function RunWorkspaceView({
   const blockingToolkits = data.toolPreflight?.toolkits.filter(
     (toolkit) => toolkit.readiness.status !== "ready",
   ) ?? [];
+  const requiredToolInputs = actionRequired?.requiredToolInputs ?? [];
+
+  useEffect(() => {
+    if (actionRequired?.reason === "tool_inputs_missing" && requiredToolInputs.length > 0) {
+      setToolInputDialogOpen(true);
+      setToolInputValues(
+        Object.fromEntries(
+          requiredToolInputs.map((input) => [
+            `${input.taskId}:${input.toolkitSlug}:${input.field}`,
+            input.value,
+          ]),
+        ),
+      );
+    }
+  }, [actionRequired?.reason, requiredToolInputs]);
 
   return (
     <section className="flex min-h-0 flex-col gap-2 p-0.5 xl:grid xl:h-full xl:grid-rows-[auto_auto_minmax(0,1fr)_auto] xl:overflow-hidden">
@@ -439,6 +476,17 @@ export function RunWorkspaceView({
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-2">
+                    {actionRequired.reason === "tool_inputs_missing" &&
+                    actionRequired.requiredToolInputs.length > 0 ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => setToolInputDialogOpen(true)}
+                        disabled={isSubmittingToolInputs}
+                      >
+                        Provide details
+                      </Button>
+                    ) : null}
                     {actionRequired.canResume && onResume ? (
                       <Button
                         type="button"
@@ -527,6 +575,72 @@ export function RunWorkspaceView({
           </AccordionContent>
         </AccordionItem>
       </Accordion>
+
+      <Dialog open={toolInputDialogOpen} onOpenChange={setToolInputDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Provide required task details</DialogTitle>
+            <DialogDescription>
+              Enter the missing URLs or inputs so AutoBot can continue the blocked tool-backed task.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {requiredToolInputs.map((input) => {
+              const key = `${input.taskId}:${input.toolkitSlug}:${input.field}`;
+              return (
+                <div className="space-y-2" key={key}>
+                  <Label htmlFor={key}>{input.prompt}</Label>
+                  <p className="text-xs text-muted-foreground">{input.helpText}</p>
+                  <Input
+                    id={key}
+                    placeholder={input.placeholder}
+                    value={toolInputValues[key] ?? ""}
+                    onChange={(event) =>
+                      setToolInputValues((current) => ({
+                        ...current,
+                        [key]: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              disabled={
+                isSubmittingToolInputs ||
+                requiredToolInputs.some((input) => {
+                  const key = `${input.taskId}:${input.toolkitSlug}:${input.field}`;
+                  return !(toolInputValues[key] ?? "").trim();
+                })
+              }
+              onClick={() => {
+                if (!onSubmitToolInputs) {
+                  return;
+                }
+
+                onSubmitToolInputs(
+                  requiredToolInputs
+                    .filter((input): input is typeof input & { taskId: string } => Boolean(input.taskId))
+                    .map((input) => {
+                      const key = `${input.taskId}:${input.toolkitSlug}:${input.field}`;
+                      return {
+                        taskId: input.taskId,
+                        toolkitSlug: input.toolkitSlug,
+                        field: input.field,
+                        value: (toolInputValues[key] ?? "").trim(),
+                      };
+                    }),
+                );
+              }}
+            >
+              {isSubmittingToolInputs ? "Saving..." : "Save details"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

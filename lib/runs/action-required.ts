@@ -6,7 +6,7 @@ import {
   ensureNotificationPreferences,
 } from "@/lib/notifications/repository";
 import { sendNotificationEmail } from "@/lib/notifications/email";
-import type { RunActionRequired, RunRecord, RunTask } from "@/lib/runs/types";
+import type { RequiredToolInput, RunActionRequired, RunRecord, RunTask } from "@/lib/runs/types";
 import { updateRunStatus } from "@/lib/runs/repository";
 import type { RunToolPreflight, ToolkitReadinessItem } from "@/lib/tools/types";
 
@@ -70,6 +70,48 @@ export function buildToolAuthActionRequired(params: {
     resumeLabel: "Resume run",
     canResume: true,
     autoResume: true,
+    requiredToolInputs: [],
+    notifiedAt: null,
+    emailFallbackAt,
+    emailEscalatedAt: null,
+    resolvedAt: null,
+  };
+}
+
+export function buildToolInputActionRequired(params: {
+  runId: string;
+  requiredToolInputs: RequiredToolInput[];
+  blockingTaskTitle?: string | null;
+  title?: string;
+  body?: string;
+  actionHref?: string | null;
+  now?: string;
+}): RunActionRequired {
+  const now = params.now ?? new Date().toISOString();
+  const emailFallbackAt = new Date(Date.parse(now) + EMAIL_FALLBACK_DELAY_MS).toISOString();
+  const uniqueToolkitSlugs = Array.from(
+    new Set(params.requiredToolInputs.map((item) => item.toolkitSlug)),
+  );
+  const actionHref = params.actionHref ?? `/dashboard/runs?runId=${params.runId}`;
+
+  return {
+    kind: "tool_input",
+    title: params.title ?? "Enter the missing details to continue this run",
+    body:
+      params.body ??
+      "AutoBot is ready to continue, but one or more tool-backed tasks still need specific URLs or inputs before they can run.",
+    reason: "tool_inputs_missing",
+    blockingTaskTitle: params.blockingTaskTitle ?? null,
+    requiredToolkitSlugs: uniqueToolkitSlugs,
+    readiness: [],
+    taskToolPlan: [],
+    actionLabel: "Provide details",
+    actionHref,
+    actionTarget: null,
+    resumeLabel: "Resume run",
+    canResume: true,
+    autoResume: false,
+    requiredToolInputs: params.requiredToolInputs,
     notifiedAt: null,
     emailFallbackAt,
     emailEscalatedAt: null,
@@ -97,6 +139,7 @@ export function buildManualPauseActionRequired(params: {
     resumeLabel: "Run",
     canResume: true,
     autoResume: false,
+    requiredToolInputs: [],
     notifiedAt: null,
     emailFallbackAt: null,
     emailEscalatedAt: null,
@@ -152,8 +195,12 @@ export async function sendRunBlockedInAppNotification(
     kind: "run_blocked",
     title: `Run stopped: ${params.objective}`,
     body: params.actionRequired.blockingTaskTitle
-      ? `AutoBot paused while working on "${params.actionRequired.blockingTaskTitle}". Open the run to connect the required apps and continue.`
-      : "AutoBot paused because a required app is not connected. Open the run to connect the required apps and continue.",
+      ? params.actionRequired.reason === "tool_inputs_missing"
+        ? `AutoBot paused while working on "${params.actionRequired.blockingTaskTitle}". Open the run to provide the missing task details and continue.`
+        : `AutoBot paused while working on "${params.actionRequired.blockingTaskTitle}". Open the run to connect the required apps and continue.`
+      : params.actionRequired.reason === "tool_inputs_missing"
+        ? "AutoBot paused because a tool-backed task still needs required details. Open the run to provide them and continue."
+        : "AutoBot paused because a required app is not connected. Open the run to connect the required apps and continue.",
     href: `/dashboard/runs?runId=${params.runId}`,
     actionLabel: "Open run",
     actionHref: `/dashboard/runs?runId=${params.runId}`,
@@ -166,6 +213,7 @@ export async function sendRunBlockedInAppNotification(
       reason: params.actionRequired.reason,
       blockingTaskTitle: params.actionRequired.blockingTaskTitle,
       taskToolPlan: params.actionRequired.taskToolPlan,
+      requiredToolInputs: params.actionRequired.requiredToolInputs,
     },
   });
 }

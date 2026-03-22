@@ -6,7 +6,10 @@ import { BellIcon, MailIcon, ShieldCheckIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/components/providers/auth-provider";
-import { Badge } from "@/components/ui/badge";
+import {
+  DashboardPageHeader,
+  DashboardPageHeaderSkeleton,
+} from "@/components/dashboard-page-header";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,7 +26,12 @@ import {
   useNotificationPreferencesQuery,
   useUpdateNotificationPreferencesMutation,
 } from "@/lib/query/notifications";
+import { ensureRouteData } from "@/lib/query/http-error";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthHref } from "@/components/auth/auth-route";
+
+const SETTINGS_PAGE_SECTION_CLASSNAME = "flex min-h-0 flex-col p-0.5";
+const SETTINGS_PAGE_STACK_CLASSNAME = "space-y-4";
 
 function PreferenceRow({
   checked,
@@ -80,51 +88,46 @@ function SettingsCardSkeleton() {
 
 export function SettingsPageSkeleton() {
   return (
-    <section className="flex min-h-full flex-1 flex-col gap-6 py-4">
-      <div className="space-y-3">
-        <Skeleton className="h-7 w-24" />
-        <div className="max-w-3xl space-y-2">
-          <Skeleton className="h-10 w-96" />
-          <Skeleton className="h-4 w-full max-w-3xl" />
-          <Skeleton className="h-4 w-11/12 max-w-3xl" />
+    <section className={SETTINGS_PAGE_SECTION_CLASSNAME}>
+      <div className={SETTINGS_PAGE_STACK_CLASSNAME}>
+        <DashboardPageHeaderSkeleton />
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <SettingsCardSkeleton />
+          <SettingsCardSkeleton />
         </div>
-      </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <SettingsCardSkeleton />
-        <SettingsCardSkeleton />
-      </div>
-
-      <Card className="border-border/70 bg-background/95">
-        <CardHeader className="space-y-3">
-          <div className="flex items-center gap-3">
-            <Skeleton className="size-10" />
-            <div className="space-y-2">
-              <Skeleton className="h-5 w-52" />
-              <Skeleton className="h-4 w-80" />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <div className="space-y-3" key={index}>
+        <Card className="border-border/70 bg-background/95">
+          <CardHeader className="space-y-3">
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-10" />
               <div className="space-y-2">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-4 w-72" />
+                <Skeleton className="h-5 w-52" />
+                <Skeleton className="h-4 w-80" />
               </div>
-              <div className="grid gap-3 lg:grid-cols-2">
-                <div className="flex items-start justify-between gap-4 border border-border/70 bg-background/80 p-4">
-                  <div className="space-y-2">
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-4 w-52" />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div className="space-y-3" key={index}>
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-4 w-72" />
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="flex items-start justify-between gap-4 border border-border/70 bg-background/80 p-4">
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-4 w-52" />
+                    </div>
+                    <Skeleton className="h-6 w-11" />
                   </div>
-                  <Skeleton className="h-6 w-11" />
                 </div>
               </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
     </section>
   );
 }
@@ -192,7 +195,7 @@ export function SettingsPageClient() {
       await supabase.auth.signOut({ scope: "global" });
       setPassword("");
       toast.success("Password updated. Please sign in again.");
-      router.replace("/auth/login");
+      router.replace(buildAuthHref("login"));
       router.refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to update password.");
@@ -236,172 +239,176 @@ export function SettingsPageClient() {
     return <SettingsPageSkeleton />;
   }
 
+  if (
+    preferencesQuery.error &&
+    !preferencesQuery.isLoading &&
+    !preferencesQuery.isFetching &&
+    !preferences
+  ) {
+    throw preferencesQuery.error;
+  }
+
+  ensureRouteData(preferences, "Notification preferences are unavailable.");
+
   return (
-    <section className="flex min-h-full flex-1 flex-col gap-6 py-4">
-      <div className="space-y-3">
-        <Badge variant="outline" className="px-3 py-1 uppercase tracking-[0.18em]">
-          Settings
-        </Badge>
-        <div className="max-w-3xl space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            Manage your account and notification flow
-          </h1>
-          <p className="text-sm leading-6 text-muted-foreground sm:text-base">
-            Update your login credentials, decide how Autobot reaches you, and keep
-            run updates flowing to the inboxes you actually want to monitor.
-          </p>
+    <section className={SETTINGS_PAGE_SECTION_CLASSNAME}>
+      <div className={SETTINGS_PAGE_STACK_CLASSNAME}>
+        <DashboardPageHeader
+          badge="Settings"
+          description="Update your login credentials, decide how Autobot reaches you, and keep run updates flowing to the inboxes you actually want to monitor."
+          heading="Manage your account and notification flow"
+        />
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <Card className="border-border/70 bg-background/95">
+            <CardHeader className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="flex size-10 items-center justify-center border border-border/70 bg-muted/40">
+                  <MailIcon className="size-4" />
+                </div>
+                <div>
+                  <CardTitle>Email address</CardTitle>
+                  <CardDescription>
+                    Supabase handles the email change and may require confirmation.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleEmailUpdate} className="space-y-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="settings-email">Email</Label>
+                  <Input
+                    id="settings-email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="name@company.com"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  Your profile display updates from the authenticated session, so the new
+                  address appears after the auth provider confirms it.
+                </p>
+                <Button type="submit" disabled={isUpdatingEmail}>
+                  {isUpdatingEmail ? "Saving..." : "Update email"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 bg-background/95">
+            <CardHeader className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="flex size-10 items-center justify-center border border-border/70 bg-muted/40">
+                  <ShieldCheckIcon className="size-4" />
+                </div>
+                <div>
+                  <CardTitle>Password</CardTitle>
+                  <CardDescription>
+                    Rotate your password without leaving the authenticated workspace.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handlePasswordUpdate} className="space-y-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="settings-password">New password</Label>
+                  <Input
+                    id="settings-password"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Create a new password"
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  Password updates apply to the current account immediately and keep your
+                  protected routes intact.
+                </p>
+                <Button type="submit" disabled={isUpdatingPassword}>
+                  {isUpdatingPassword ? "Saving..." : "Update password"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
         </div>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Card className="border-border/70 bg-background/95">
-          <CardHeader className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center border border-border/70 bg-muted/40">
-                <MailIcon className="size-4" />
-              </div>
-              <div>
-                <CardTitle>Email address</CardTitle>
-                <CardDescription>
-                  Supabase handles the email change and may require confirmation.
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleEmailUpdate} className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="settings-email">Email</Label>
-                <Input
-                  id="settings-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="name@company.com"
-                  autoComplete="email"
-                  required
-                />
-              </div>
-              <p className="text-sm leading-6 text-muted-foreground">
-                Your profile display updates from the authenticated session, so the new
-                address appears after the auth provider confirms it.
-              </p>
-              <Button type="submit" disabled={isUpdatingEmail}>
-                {isUpdatingEmail ? "Saving..." : "Update email"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
 
         <Card className="border-border/70 bg-background/95">
           <CardHeader className="space-y-3">
             <div className="flex items-center gap-3">
               <div className="flex size-10 items-center justify-center border border-border/70 bg-muted/40">
-                <ShieldCheckIcon className="size-4" />
+                <BellIcon className="size-4" />
               </div>
               <div>
-                <CardTitle>Password</CardTitle>
+                <CardTitle>Notification preferences</CardTitle>
                 <CardDescription>
-                  Rotate your password without leaving the authenticated workspace.
+                  Control which updates land in your inbox or inside the product.
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={handlePasswordUpdate} className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="settings-password">New password</Label>
-                <Input
-                  id="settings-password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Create a new password"
-                  autoComplete="new-password"
-                  required
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Marketing
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Optional product education, launches, and customer-facing announcements by email.
+                </p>
+              </div>
+              <div className="grid gap-3">
+                <PreferenceRow
+                  checked={preferences?.marketingEmail ?? true}
+                  disabled={!preferences || updatePreferencesMutation.isPending}
+                  label="Email marketing"
+                  description="Receive launch notes and campaign updates by email."
+                  onCheckedChange={(nextChecked) =>
+                    updatePreference("marketingEmail", nextChecked)
+                  }
                 />
               </div>
-              <p className="text-sm leading-6 text-muted-foreground">
-                Password updates apply to the current account immediately and keep your
-                protected routes intact.
-              </p>
-              <Button type="submit" disabled={isUpdatingPassword}>
-                {isUpdatingPassword ? "Saving..." : "Update password"}
-              </Button>
-            </form>
+            </div>
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Platform updates
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  AI run lifecycle notifications, blocked steps, and action-required task updates.
+                </p>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <PreferenceRow
+                  checked={preferences?.platformUpdatesEmail ?? true}
+                  disabled={!preferences || updatePreferencesMutation.isPending}
+                  label="Email run updates"
+                  description="Get sent summaries when a run blocks, fails, or completes."
+                  onCheckedChange={(nextChecked) =>
+                    updatePreference("platformUpdatesEmail", nextChecked)
+                  }
+                />
+                <PreferenceRow
+                  checked={preferences?.platformUpdatesInApp ?? true}
+                  disabled={!preferences || updatePreferencesMutation.isPending}
+                  label="In-app run updates"
+                  description="Show actionable run alerts in the top-right inbox."
+                  onCheckedChange={(nextChecked) =>
+                    updatePreference("platformUpdatesInApp", nextChecked)
+                  }
+                />
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
-
-      <Card className="border-border/70 bg-background/95">
-        <CardHeader className="space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center border border-border/70 bg-muted/40">
-              <BellIcon className="size-4" />
-            </div>
-            <div>
-              <CardTitle>Notification preferences</CardTitle>
-              <CardDescription>
-                Control which updates land in your inbox or inside the product.
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                Marketing
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Optional product education, launches, and customer-facing announcements by email.
-              </p>
-            </div>
-            <div className="grid gap-3">
-              <PreferenceRow
-                checked={preferences?.marketingEmail ?? true}
-                disabled={!preferences || updatePreferencesMutation.isPending}
-                label="Email marketing"
-                description="Receive launch notes and campaign updates by email."
-                onCheckedChange={(nextChecked) =>
-                  updatePreference("marketingEmail", nextChecked)
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                Platform updates
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                AI run lifecycle notifications, blocked steps, and action-required task updates.
-              </p>
-            </div>
-            <div className="grid gap-3 lg:grid-cols-2">
-              <PreferenceRow
-                checked={preferences?.platformUpdatesEmail ?? true}
-                disabled={!preferences || updatePreferencesMutation.isPending}
-                label="Email run updates"
-                description="Get sent summaries when a run blocks, fails, or completes."
-                onCheckedChange={(nextChecked) =>
-                  updatePreference("platformUpdatesEmail", nextChecked)
-                }
-              />
-              <PreferenceRow
-                checked={preferences?.platformUpdatesInApp ?? true}
-                disabled={!preferences || updatePreferencesMutation.isPending}
-                label="In-app run updates"
-                description="Show actionable run alerts in the top-right inbox."
-                onCheckedChange={(nextChecked) =>
-                  updatePreference("platformUpdatesInApp", nextChecked)
-                }
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </section>
   );
 }

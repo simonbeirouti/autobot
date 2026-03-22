@@ -14,7 +14,6 @@ import { NavMain } from "@/components/nav-main";
 import { ProjectSwitcher } from "@/components/project-switcher";
 import { NavSecondary } from "@/components/nav-secondary";
 import { NavUser } from "@/components/nav-user";
-import { useAuth } from "@/components/providers/auth-provider";
 import {
   Sidebar,
   SidebarContent,
@@ -72,7 +71,6 @@ function findMatchingHref(
 }
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
-  const { user } = useAuth();
   const pathname = usePathname();
   const [lastClickedHref, setLastClickedHref] = React.useState<string | null>(null);
   const primaryItems = React.useMemo<SidebarNavItem[]>(
@@ -128,7 +126,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
         />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={user} />
+        <NavUser />
       </SidebarFooter>
     </Sidebar>
   );

@@ -120,6 +120,15 @@ export function ProjectProvider({
     toProjectDisplay(activeProject) ??
     (activeProjectSnapshot?.id === activeProjectId ? activeProjectSnapshot : null);
 
+  if (
+    projectsQuery.error &&
+    !projectsQuery.isLoading &&
+    !projectsQuery.isFetching &&
+    !projectsQuery.data
+  ) {
+    throw projectsQuery.error;
+  }
+
   useEffect(() => {
     setActiveProjectIdState(readStoredProjectId());
     setActiveProjectSnapshot(readStoredProjectSnapshot());

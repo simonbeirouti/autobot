@@ -63,6 +63,7 @@ import {
   getDraftsUpdatedAt,
   upsertDraftInList,
 } from "@/lib/query/dashboard";
+import { isNotFoundError } from "@/lib/query/http-error";
 import { useDelayedVisibility } from "@/lib/query/use-delayed-visibility";
 import type { IntakeDraft, IntakeFlowResponse, IntakeQuestion } from "@/lib/intake/types";
 import type { RunToolPreflight } from "@/lib/tools/types";
@@ -1048,10 +1049,14 @@ export function DraftsDashboardClient({
     hasDraftsLoadError,
     ERROR_VISIBILITY_DELAY_MS,
   );
-  const selectedDraftId =
-    requestedDraftId && drafts.some((draft) => draft.id === requestedDraftId)
+  const hasRequestedDraft = requestedDraftId
+    ? drafts.some((draft) => draft.id === requestedDraftId)
+    : false;
+  const selectedDraftId = requestedDraftId
+    ? hasRequestedDraft
       ? requestedDraftId
-      : initialSelectedDraftId ?? drafts[0]?.id ?? null;
+      : null
+    : initialSelectedDraftId ?? drafts[0]?.id ?? null;
   const deferredDraftId = useDeferredValue(selectedDraftId);
 
   useEffect(() => {
@@ -1128,6 +1133,47 @@ export function DraftsDashboardClient({
   const toolPreflight =
     preflightQuery.data ??
     (flowQuery.data?.draft.id === selectedDraftId ? flowQuery.data.toolPreflight ?? null : null);
+
+  if (draftsQuery.error && !draftsQuery.isLoading && !draftsQuery.isFetching && !draftsQuery.data) {
+    throw draftsQuery.error;
+  }
+
+  const isMissingRequestedDraft =
+    Boolean(
+      requestedDraftId &&
+      activeProject &&
+      !draftsQuery.isLoading &&
+      !draftsQuery.isFetching &&
+      !draftsQuery.error &&
+      !hasRequestedDraft,
+    ) ||
+    Boolean(
+      selectedDraftId &&
+      flowQuery.error &&
+      !flowQuery.isLoading &&
+      !flowQuery.isFetching &&
+      !flowQuery.data &&
+      isNotFoundError(flowQuery.error),
+    );
+
+  if (
+    flowQuery.error &&
+    !flowQuery.isLoading &&
+    !flowQuery.isFetching &&
+    !flowQuery.data &&
+    !isNotFoundError(flowQuery.error)
+  ) {
+    throw flowQuery.error;
+  }
+
+  if (
+    preflightQuery.error &&
+    !preflightQuery.isLoading &&
+    !preflightQuery.isFetching &&
+    preflightQuery.data === undefined
+  ) {
+    throw preflightQuery.error;
+  }
 
   const handleSelectDraft = (draftId: string) => {
     startTransition(() => {
@@ -1612,6 +1658,32 @@ export function DraftsDashboardClient({
           </Card>
         ) : !selectedDraftId && (isRestoring || draftsQuery.isLoading) ? (
           <DraftWorkspaceSkeleton />
+        ) : isMissingRequestedDraft ? (
+          <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
+            <CardContent className="flex h-full items-center justify-center py-0">
+              <Empty className="max-w-md border-border">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FileTextIcon className="size-4" />
+                  </EmptyMedia>
+                  <EmptyTitle>Draft not found</EmptyTitle>
+                  <EmptyDescription>
+                    This draft is no longer available. Choose another draft from the list or go back to the drafts view.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <Button
+                  onClick={() => {
+                    startTransition(() => {
+                      router.replace(pathname, { scroll: false });
+                    });
+                  }}
+                  type="button"
+                >
+                  Back to drafts
+                </Button>
+              </Empty>
+            </CardContent>
+          </Card>
         ) : !selectedDraftId ? (
           <Card className="min-h-[320px] justify-center overflow-hidden xl:h-full xl:min-h-0">
             <CardContent className="flex h-full items-center justify-center py-0">

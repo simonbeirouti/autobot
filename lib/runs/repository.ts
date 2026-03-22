@@ -172,6 +172,7 @@ export async function insertRunTasks(
     requiredToolIds: string[];
     executionStrategy: "manual_setup" | "tool_execution" | "analysis_only";
     toolSummary: string | null;
+    toolInput: Record<string, Record<string, unknown>>;
     actionRequired?: RunActionRequired | null;
   }>,
 ) {
@@ -194,6 +195,7 @@ export async function insertRunTasks(
         required_tool_ids: task.requiredToolIds,
         execution_strategy: task.executionStrategy,
         tool_summary: task.toolSummary,
+        tool_input: task.toolInput ?? {},
         action_required: task.actionRequired ?? null,
       })),
   );
@@ -309,7 +311,7 @@ export async function fetchWorkspace(
     await Promise.all([
       supabase
         .from("run_tasks")
-        .select("id, run_id, title, description, status, position, agent_id, agent_label, tool_requirement, required_toolkit_slugs, optional_toolkit_slugs, required_tool_ids, execution_strategy, tool_summary, action_required, created_at, updated_at")
+        .select("id, run_id, title, description, status, position, agent_id, agent_label, tool_requirement, required_toolkit_slugs, optional_toolkit_slugs, required_tool_ids, execution_strategy, tool_summary, tool_input, action_required, created_at, updated_at")
         .eq("run_id", params.runId)
         .order("position", { ascending: true }),
       supabase
@@ -408,6 +410,7 @@ export async function updateTaskStatuses(
         required_tool_ids: task.requiredToolIds,
         execution_strategy: task.executionStrategy,
         tool_summary: task.toolSummary,
+        tool_input: task.toolInput ?? {},
         action_required: task.actionRequired ?? null,
       })
       .eq("id", task.id)
@@ -455,6 +458,7 @@ export async function syncRunTasks(
       required_tool_ids: task.requiredToolIds,
       execution_strategy: task.executionStrategy,
       tool_summary: task.toolSummary,
+      tool_input: task.toolInput ?? {},
       action_required: task.actionRequired ?? null,
     })),
   );
@@ -567,6 +571,7 @@ function mapTask(row: {
   required_tool_ids: string[] | null;
   execution_strategy: "manual_setup" | "tool_execution" | "analysis_only";
   tool_summary: string | null;
+  tool_input: Record<string, Record<string, unknown>> | null;
   action_required: RunActionRequired | null;
   created_at: string;
   updated_at: string;
@@ -586,6 +591,7 @@ function mapTask(row: {
     requiredToolIds: row.required_tool_ids ?? [],
     executionStrategy: row.execution_strategy,
     toolSummary: row.tool_summary,
+    toolInput: row.tool_input ?? {},
     actionRequired: row.action_required ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -16,6 +16,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PROJECT_ONBOARDING_ROUTE } from "@/lib/routes";
+import { buildAuthHref } from "@/components/auth/auth-route";
+import { buildAuthErrorHref, getAuthFlowError } from "@/components/auth/auth-error";
 
 export function SignUpForm({
   className,
@@ -41,7 +43,7 @@ export function SignUpForm({
     }
 
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -49,9 +51,14 @@ export function SignUpForm({
         },
       });
       if (error) throw error;
-      router.push("/auth/sign-up-success");
+      if (Array.isArray(data.user?.identities) && data.user.identities.length === 0) {
+        router.push(buildAuthErrorHref("account-exists"));
+        return;
+      }
+      router.push(buildAuthHref("sign-up-success"));
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
+      const authError = getAuthFlowError(error, "sign-up");
+      router.push(buildAuthErrorHref(authError.code, authError.message));
     } finally {
       setIsLoading(false);
     }
@@ -109,7 +116,7 @@ export function SignUpForm({
             </div>
             <div className="mt-4 text-center text-sm">
               Already have an account?{" "}
-              <Link href="/auth/login" className="underline underline-offset-4">
+              <Link href={buildAuthHref("login")} className="underline underline-offset-4">
                 Login
               </Link>
             </div>

@@ -1138,6 +1138,7 @@ export type Database = {
           run_id: string
           status: Database["public"]["Enums"]["task_status"]
           title: string
+          tool_input: Json
           tool_requirement: string
           tool_summary: string | null
           updated_at: string
@@ -1157,6 +1158,7 @@ export type Database = {
           run_id: string
           status?: Database["public"]["Enums"]["task_status"]
           title: string
+          tool_input?: Json
           tool_requirement?: string
           tool_summary?: string | null
           updated_at?: string
@@ -1176,6 +1178,7 @@ export type Database = {
           run_id?: string
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
+          tool_input?: Json
           tool_requirement?: string
           tool_summary?: string | null
           updated_at?: string

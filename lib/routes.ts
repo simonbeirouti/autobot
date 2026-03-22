@@ -1,6 +1,22 @@
 export const DASHBOARD_HOME_ROUTE = "/dashboard";
-export const PROJECTS_ROUTE = "/projects";
-export const PROJECT_ONBOARDING_ROUTE = "/projects/new";
+export const PROJECTS_ROUTE = "/dashboard/projects";
+export const SETTINGS_ROUTE = "/dashboard/settings";
+export const PROJECT_ONBOARDING_ROUTE = "/new";
+
+export const PUBLIC_MARKETING_ROUTES = [
+  {
+    href: "/",
+    label: "Home",
+  },
+  {
+    href: "/about",
+    label: "About",
+  },
+  {
+    href: "/contact",
+    label: "Contact",
+  },
+] as const;
 
 export function getProjectSwitcherDestination(pathname: string | null) {
   if (pathname?.startsWith("/dashboard")) {

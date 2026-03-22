@@ -14,6 +14,7 @@ import {
 import { resolveCompanyKey } from "@/lib/projects/context";
 import { fetchProject } from "@/lib/projects/repository";
 import type { InternalToolDetailPayload } from "@/lib/tools/types";
+import { isSupabaseRowNotFoundError } from "@/lib/supabase/errors";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -92,6 +93,10 @@ export async function GET(
       },
     );
   } catch (error) {
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
+
     return NextResponse.json(
       {
         error:
@@ -151,6 +156,10 @@ export async function PATCH(
       }),
     } satisfies InternalToolDetailPayload);
   } catch (error) {
+    if (isSupabaseRowNotFoundError(error)) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
+
     return NextResponse.json(
       {
         error:

@@ -510,6 +510,165 @@ describe("executeResolvedTool", () => {
     expect(result.message).toContain("No internal web search provider is configured");
   });
 
+  it("audits robots.txt and sitemaps successfully", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith("/robots.txt")) {
+          return {
+            ok: true,
+            status: 200,
+            url,
+            headers: { get: vi.fn().mockReturnValue("text/plain") },
+            text: vi
+              .fn()
+              .mockResolvedValue("User-agent: *\nDisallow: /admin\nSitemap: https://example.com/sitemap.xml"),
+          };
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          url,
+          headers: { get: vi.fn().mockReturnValue("application/xml") },
+          text: vi
+            .fn()
+            .mockResolvedValue(
+              "<?xml version=\"1.0\"?><urlset><url><loc>https://example.com/</loc></url><url><loc>https://example.com/pricing</loc></url></urlset>",
+            ),
+        };
+      }),
+    );
+
+    const result = await executeResolvedTool({
+      supabase: {} as never,
+      context: {
+        userId: "user-1",
+        projectId: null,
+        objectiveId: null,
+        threadId: null,
+        runId: null,
+        allowedToolkitSlugs: ["sitemap_robots_audit"],
+        confirmedWriteActions: false,
+      },
+      candidate: makeCandidate({
+        id: "tool:sitemap_robots_audit",
+        toolSlug: "sitemap_robots_audit",
+        toolkitSlug: "sitemap_robots_audit",
+        title: "Sitemap And Robots Audit",
+        description: "Audit robots and sitemaps.",
+        executorKey: "sitemap_robots_audit",
+      }),
+      input: {
+        siteUrl: "https://example.com",
+      },
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.data?.coverageSummary).toEqual(
+      expect.objectContaining({
+        uniquePageUrlCount: 2,
+        blockedPathCount: 1,
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("supports inline table queries without project assets", async () => {
+    const result = await executeResolvedTool({
+      supabase: {} as never,
+      context: {
+        userId: "user-1",
+        projectId: null,
+        objectiveId: null,
+        threadId: null,
+        runId: null,
+        allowedToolkitSlugs: ["table_query"],
+        confirmedWriteActions: false,
+      },
+      candidate: makeCandidate({
+        id: "tool:table_query",
+        toolSlug: "table_query",
+        toolkitSlug: "table_query",
+        title: "Table Query",
+        description: "Analyze structured data.",
+        executorKey: "table_query",
+      }),
+      input: {
+        csvContent: "company,visits\nAcme,5\nBeta,2\nAcme,7",
+        operation: "group_count",
+        groupBy: "company",
+      },
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.data?.result).toEqual(
+      expect.objectContaining({
+        groupBy: "company",
+        groups: expect.arrayContaining([
+          expect.objectContaining({ group: "Acme", count: 2 }),
+          expect.objectContaining({ group: "Beta", count: 1 }),
+        ]),
+      }),
+    );
+  });
+
+  it("writes a report artifact successfully after confirmation", async () => {
+    mockedCreateProjectAsset.mockResolvedValue({
+      id: "asset-report-1",
+      projectId: "project-1",
+      userId: "user-1",
+      label: "Q1 Competitor Report",
+      assetType: "analysis_report",
+      storagePath: null,
+      metadata: {},
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    });
+
+    const result = await executeResolvedTool({
+      supabase: {} as never,
+      context: {
+        userId: "user-1",
+        projectId: "project-1",
+        objectiveId: null,
+        threadId: null,
+        runId: null,
+        allowedToolkitSlugs: ["report_writer"],
+        confirmedWriteActions: true,
+      },
+      candidate: makeCandidate({
+        id: "tool:report_writer",
+        toolSlug: "report_writer",
+        toolkitSlug: "report_writer",
+        title: "Report Writer",
+        description: "Persist a report artifact.",
+        executorKey: "report_writer",
+        executionMode: "write",
+        riskLevel: "medium",
+        approvalPolicy: "confirm_writes",
+      }),
+      input: {
+        title: "Q1 Competitor Report",
+        reportType: "analysis_report",
+        summary: "A concise summary.",
+        findings: [{ title: "Pricing emphasis", detail: "Competitors foreground pricing clarity." }],
+        sections: [{ heading: "Recommendation", body: "Tighten our own packaging language." }],
+        writeMemorySummary: false,
+      },
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(mockedCreateProjectAsset).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: "project-1",
+        label: "Q1 Competitor Report",
+        assetType: "analysis_report",
+      }),
+    );
+  });
+
   it("executes an internal custom HTTP tool and logs custom metadata", async () => {
     vi.stubGlobal(
       "fetch",

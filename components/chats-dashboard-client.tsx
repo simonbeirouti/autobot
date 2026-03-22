@@ -9,6 +9,12 @@ import { toast } from "sonner";
 
 import { useProject } from "@/components/providers/project-provider";
 import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,6 +29,7 @@ import {
   dashboardQueryTimings,
   fetchJson,
 } from "@/lib/query/dashboard";
+import { isNotFoundError } from "@/lib/query/http-error";
 import type {
   ProjectChatMessage,
   ProjectChatResponse,
@@ -144,21 +151,53 @@ async function streamProjectChat(
 function ChatsDashboardSkeleton() {
   return (
     <WorkspaceSplitLayout
-      sidebar={<WorkspaceSidebarSkeleton titleWidth="w-0" descriptionWidth="w-0" itemCount={5} />}
+      sidebar={
+        <WorkspaceSidebarSkeleton
+          descriptionWidth="w-0"
+          itemCount={5}
+          titleWidth="w-0"
+        />
+      }
       content={
-        <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] border bg-background">
-          <div className="border-b px-4 py-4">
-            <Skeleton className="h-full min-h-[320px] w-full" />
+        <div className="flex h-full min-h-0 flex-col border bg-background">
+          <div className="min-h-0 flex-1 border-b px-4 py-4">
+            <div className="flex min-h-full flex-col justify-end gap-4">
+              <div className="flex justify-start">
+                <div className="w-full max-w-[85%] space-y-3 border bg-card px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-3 w-16" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-5/6" />
+                  <Skeleton className="h-4 w-2/3" />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <div className="w-full max-w-[80%] space-y-3 border border-primary/20 bg-primary/5 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-3 w-10" />
+                    <Skeleton className="h-3 w-16" />
+                  </div>
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-3 px-4 py-4">
-            <Skeleton className="h-10 flex-1" />
-            <Skeleton className="h-10 w-24" />
+          <div className="shrink-0 px-2 py-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
+            <div className="flex items-end gap-3">
+              <Skeleton className="h-20 flex-1" />
+              <Skeleton className="h-10 w-20" />
+            </div>
           </div>
         </div>
       }
     />
   );
 }
+
+export { ChatsDashboardSkeleton };
 
 function MessageBubble({
   role,
@@ -421,6 +460,32 @@ export function ChatsDashboardClient() {
     );
   }
 
+  const isMissingRequestedThread =
+    Boolean(
+      requestedThreadId &&
+      workspace &&
+      !isStartingNewThread &&
+      !workspace.threads.some((thread) => thread.id === requestedThreadId),
+    ) ||
+    Boolean(
+      requestedThreadId &&
+      projectWorkspaceQuery.error &&
+      !projectWorkspaceQuery.isLoading &&
+      !projectWorkspaceQuery.isFetching &&
+      !workspace &&
+      isNotFoundError(projectWorkspaceQuery.error),
+    );
+
+  if (
+    projectWorkspaceQuery.error &&
+    !projectWorkspaceQuery.isLoading &&
+    !projectWorkspaceQuery.isFetching &&
+    !workspace &&
+    !isNotFoundError(projectWorkspaceQuery.error)
+  ) {
+    throw projectWorkspaceQuery.error;
+  }
+
   if (projectWorkspaceQuery.isLoading || !workspace) {
     return <ChatsDashboardSkeleton />;
   }
@@ -484,7 +549,30 @@ export function ChatsDashboardClient() {
     </WorkspaceSidebarPanel>
   );
 
-  const chatContent = (
+  const chatContent = isMissingRequestedThread ? (
+    <div className="flex h-full min-h-0 flex-col border bg-background">
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
+        <Empty className="max-w-md border-border">
+          <EmptyHeader>
+            <EmptyTitle>Thread not found</EmptyTitle>
+            <EmptyDescription>
+              This thread is no longer available. Choose another thread from the list or go back to the chats view.
+            </EmptyDescription>
+          </EmptyHeader>
+          <Button
+            onClick={() => {
+              startTransition(() => {
+                router.replace(pathname, { scroll: false });
+              });
+            }}
+            type="button"
+          >
+            Back to chats
+          </Button>
+        </Empty>
+      </div>
+    </div>
+  ) : (
     <div className="flex h-full min-h-0 flex-col border bg-background">
       <div className="min-h-0 flex-1 border-b">
         <div className="h-full px-2 py-2" ref={messageScrollerRef}>
