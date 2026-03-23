@@ -1,4 +1,4 @@
-import { ProjectOnboardingScreen } from "@/components/project-onboarding-screen";
+import { ProjectOnboardingScreen } from "@/components/dashboard/project-onboarding-screen";
 
 export default function ProjectOnboardingPage() {
   return <ProjectOnboardingScreen />;

@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
+import { ToolConnectionChecklist } from "@/components/dashboard/tool-connection-checklist";
 import {
   Accordion,
   AccordionContent,

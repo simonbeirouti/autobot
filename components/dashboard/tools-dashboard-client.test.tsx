@@ -24,7 +24,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { useProject } from "@/components/providers/project-provider";
-import { ToolsDashboardClient } from "@/components/tools-dashboard-client";
+import { ToolsDashboardClient } from "@/components/dashboard/tools-dashboard-client";
 
 const mockedUseProject = vi.mocked(useProject);
 

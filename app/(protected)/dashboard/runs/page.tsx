@@ -1,7 +1,7 @@
-import { PageShell } from "@/components/page-shell";
+import { PageShell } from "@/components/layout/page-shell";
 import {
   RunsDashboardClient,
-} from "@/components/runs-dashboard-client";
+} from "@/components/dashboard/runs-dashboard-client";
 
 export default function RunsPage() {
   return (

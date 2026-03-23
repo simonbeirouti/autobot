@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { PageShell } from "@/components/page-shell";
+import { PageShell } from "@/components/layout/page-shell";
 import { createPageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = createPageMetadata({

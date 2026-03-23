@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/supabase/auth";
-import { PageShell } from "@/components/page-shell";
-import { SettingsPageClient } from "@/components/settings-page-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { SettingsPageClient } from "@/components/dashboard/settings-page-client";
 
 export default async function SettingsPage() {
   await requireUser();

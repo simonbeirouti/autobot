@@ -53,7 +53,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { WorkspaceSidebarPanel } from "@/components/workspace-layout";
+import { WorkspaceSidebarPanel } from "@/components/layout/workspace-layout";
 import { dashboardQueryKeys, dashboardQueryTimings, fetchJson } from "@/lib/query/dashboard";
 import { ensureRouteData, isNotFoundError } from "@/lib/query/http-error";
 import type {

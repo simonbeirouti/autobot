@@ -5,9 +5,9 @@ import { usePathname } from "next/navigation";
 import { SendIcon } from "lucide-react";
 
 import { RouteBreadcrumb } from "@/app/(protected)/route-breadcrumb";
-import { AppSidebar } from "@/components/app-sidebar";
-import { FeedbackDialog } from "@/components/feedback-dialog";
-import { NotificationInbox } from "@/components/notification-inbox";
+import { AppSidebar } from "@/components/layout/app-sidebar";
+import { FeedbackDialog } from "@/components/dashboard/feedback-dialog";
+import { NotificationInbox } from "@/components/dashboard/notification-inbox";
 import { useProject } from "@/components/providers/project-provider";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";

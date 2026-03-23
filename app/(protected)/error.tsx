@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 
-import { RouteStateCard } from "@/components/route-state-card";
+import { RouteStateCard } from "@/components/dashboard/route-state-card";
 import { Button } from "@/components/ui/button";
 import { DASHBOARD_HOME_ROUTE } from "@/lib/routes";
 

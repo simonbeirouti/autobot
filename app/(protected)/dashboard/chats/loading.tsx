@@ -1,5 +1,5 @@
-import { PageShell } from "@/components/page-shell";
-import { ChatsDashboardSkeleton } from "@/components/chats-dashboard-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { ChatsDashboardSkeleton } from "@/components/dashboard/chats-dashboard-client";
 
 export default function Loading() {
   return (

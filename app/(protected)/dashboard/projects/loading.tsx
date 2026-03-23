@@ -1,5 +1,5 @@
-import { PageShell } from "@/components/page-shell";
-import { ProjectsOverviewSkeleton } from "@/components/projects-overview-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { ProjectsOverviewSkeleton } from "@/components/dashboard/projects-overview-client";
 
 export default function Loading() {
   return (

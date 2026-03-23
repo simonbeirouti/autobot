@@ -1,5 +1,5 @@
-import { PageShell } from "@/components/page-shell";
-import { ToolsDashboardSkeleton } from "@/components/tools-dashboard-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { ToolsDashboardSkeleton } from "@/components/dashboard/tools-dashboard-client";
 
 export default function Loading() {
   return (

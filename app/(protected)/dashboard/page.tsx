@@ -1,5 +1,5 @@
-import { PageShell } from "@/components/page-shell";
-import { DashboardHomeClient } from "@/components/dashboard-home-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { DashboardHomeClient } from "@/components/dashboard/dashboard-home-client";
 
 export default function Home() {
   return (

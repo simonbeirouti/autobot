@@ -16,7 +16,7 @@ import { useProject } from "@/components/providers/project-provider";
 import {
   DashboardPageHeader,
   DashboardPageHeaderSkeleton,
-} from "@/components/dashboard-page-header";
+} from "@/components/dashboard/dashboard-page-header";
 import {
   AlertDialog,
   AlertDialogAction,

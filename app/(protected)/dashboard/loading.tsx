@@ -1,5 +1,5 @@
-import { DashboardHomeSkeleton } from "@/components/dashboard-home-client";
-import { PageShell } from "@/components/page-shell";
+import { DashboardHomeSkeleton } from "@/components/dashboard/dashboard-home-client";
+import { PageShell } from "@/components/layout/page-shell";
 
 export default function Loading() {
   return (

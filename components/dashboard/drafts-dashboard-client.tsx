@@ -9,14 +9,14 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { CheckIcon, ChevronDownIcon, Clock3Icon, FileTextIcon, PanelLeftIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
-import { MarkdownPreview } from "@/components/markdown-preview";
+import { MarkdownPreview } from "@/components/dashboard/markdown-preview";
 import { useProject } from "@/components/providers/project-provider";
-import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
+import { ToolConnectionChecklist } from "@/components/dashboard/tool-connection-checklist";
 import {
   WorkspaceSidebarPanel,
   WorkspaceSidebarSkeleton,
   WorkspaceSplitLayout,
-} from "@/components/workspace-layout";
+} from "@/components/layout/workspace-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

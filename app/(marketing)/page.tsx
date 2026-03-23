@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { MarketingHomepage } from "@/components/marketing/homepage";
-import { PageShell } from "@/components/page-shell";
+import { PageShell } from "@/components/layout/page-shell";
 import { createPageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = createPageMetadata({

@@ -1,5 +1,5 @@
-import { PageShell } from "@/components/page-shell";
-import { RunsDashboardSkeleton } from "@/components/runs-dashboard-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { RunsDashboardSkeleton } from "@/components/dashboard/runs-dashboard-client";
 
 export default function Loading() {
   return (

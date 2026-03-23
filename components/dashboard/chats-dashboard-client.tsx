@@ -23,7 +23,7 @@ import {
   WorkspaceSidebarPanel,
   WorkspaceSidebarSkeleton,
   WorkspaceSplitLayout,
-} from "@/components/workspace-layout";
+} from "@/components/layout/workspace-layout";
 import {
   dashboardQueryKeys,
   dashboardQueryTimings,

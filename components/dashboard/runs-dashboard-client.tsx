@@ -14,14 +14,14 @@ import {
   resumeWorkspace,
   RunWorkspaceSkeleton,
   RunWorkspaceView,
-} from "@/components/run-workspace";
-import { ToolConnectModal } from "@/components/tool-connect-modal";
+} from "@/components/dashboard/run-workspace";
+import { ToolConnectModal } from "@/components/dashboard/tool-connect-modal";
 import { useProject } from "@/components/providers/project-provider";
 import {
   WorkspaceSidebarPanel,
   WorkspaceSidebarSkeleton,
   WorkspaceSplitLayout,
-} from "@/components/workspace-layout";
+} from "@/components/layout/workspace-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

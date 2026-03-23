@@ -1,5 +1,5 @@
-import { PageShell } from "@/components/page-shell";
-import { DraftsDashboardSkeleton } from "@/components/drafts-dashboard-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { DraftsDashboardSkeleton } from "@/components/dashboard/drafts-dashboard-client";
 
 export default function Loading() {
   return (

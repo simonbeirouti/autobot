@@ -9,7 +9,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import {
   DashboardPageHeader,
   DashboardPageHeaderSkeleton,
-} from "@/components/dashboard-page-header";
+} from "@/components/dashboard/dashboard-page-header";
 import { Button } from "@/components/ui/button";
 import {
   Card,

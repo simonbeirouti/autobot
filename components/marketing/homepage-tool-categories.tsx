@@ -115,14 +115,14 @@ export function HomepageToolCategories() {
     : { duration: 0.78, ease: [0.16, 1, 0.3, 1] as const };
 
   return (
-    <section className="h-[75svh] bg-background">
-        <div className="mx-auto flex h-[75svh] w-full max-w-7xl items-center justify-center px-6 sm:px-8 lg:px-12">
+    <section className="min-h-[75svh] bg-background">
+        <div className="mx-auto flex min-h-[75svh] w-full max-w-7xl items-center justify-center px-6 sm:px-8 lg:px-12">
           <motion.div
             variants={stackVariants}
             initial={shouldReduceMotion ? undefined : "hidden"}
             whileInView={shouldReduceMotion ? undefined : "visible"}
             viewport={{ once: true, amount: 0.3 }}
-            className="flex h-[75svh] w-full max-w-5xl flex-col items-center justify-start pt-[10svh]"
+            className="flex min-h-[75svh] w-full max-w-5xl flex-col items-center justify-start pt-[10svh]"
           >
           {categoryRows.map((row, index) => {
             const isActive = activeIndex === index;

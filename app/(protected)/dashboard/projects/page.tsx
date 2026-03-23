@@ -1,5 +1,5 @@
-import { PageShell } from "@/components/page-shell";
-import { ProjectsOverviewClient } from "@/components/projects-overview-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { ProjectsOverviewClient } from "@/components/dashboard/projects-overview-client";
 
 export default function ProjectsPage() {
   return (

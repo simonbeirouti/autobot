@@ -1,7 +1,7 @@
 import {
   DraftsDashboardClient,
-} from "@/components/drafts-dashboard-client";
-import { PageShell } from "@/components/page-shell";
+} from "@/components/dashboard/drafts-dashboard-client";
+import { PageShell } from "@/components/layout/page-shell";
 
 export default function DraftsPage() {
   return (

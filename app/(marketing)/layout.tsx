@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 
-import { MarketingFooter } from "@/components/marketing-footer";
-import Nav from "@/components/nav";
+import { MarketingFooter } from "@/components/layout/marketing-footer";
+import Nav from "@/components/layout/nav";
 
 function NavFallback() {
   return (

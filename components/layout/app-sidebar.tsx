@@ -10,10 +10,10 @@ import {
   type SidebarNavItem,
   type SidebarProjectItem,
 } from "@/app/(protected)/layout-config";
-import { NavMain } from "@/components/nav-main";
-import { ProjectSwitcher } from "@/components/project-switcher";
-import { NavSecondary } from "@/components/nav-secondary";
-import { NavUser } from "@/components/nav-user";
+import { NavMain } from "@/components/layout/nav-main";
+import { ProjectSwitcher } from "@/components/layout/project-switcher";
+import { NavSecondary } from "@/components/layout/nav-secondary";
+import { NavUser } from "@/components/layout/nav-user";
 import {
   Sidebar,
   SidebarContent,

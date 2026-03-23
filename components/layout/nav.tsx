@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { AuthButton } from "./auth/auth-button";
+import { AuthButton } from "../auth/auth-button";
 import { MobileNavMenu } from "./mobile-nav-menu";
 import { PUBLIC_MARKETING_ROUTES } from "@/lib/routes";
 import { getCurrentUser } from "@/lib/supabase/auth";

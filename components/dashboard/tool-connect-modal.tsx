@@ -1,6 +1,6 @@
 "use client";
 
-import { ToolConnectionChecklist } from "@/components/tool-connection-checklist";
+import { ToolConnectionChecklist } from "@/components/dashboard/tool-connection-checklist";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

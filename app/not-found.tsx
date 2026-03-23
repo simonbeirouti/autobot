@@ -1,4 +1,4 @@
-import { RouteStateCard } from "@/components/route-state-card";
+import { RouteStateCard } from "@/components/dashboard/route-state-card";
 
 export default function NotFound() {
   return (

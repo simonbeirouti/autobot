@@ -1,5 +1,5 @@
-import { PageShell } from "@/components/page-shell";
-import { SettingsPageSkeleton } from "@/components/settings-page-client";
+import { PageShell } from "@/components/layout/page-shell";
+import { SettingsPageSkeleton } from "@/components/dashboard/settings-page-client";
 
 export default function Loading() {
   return (

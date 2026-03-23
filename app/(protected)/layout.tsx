@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 
-import { ProtectedLayoutClient } from "@/components/protected-layout-client";
+import { ProtectedLayoutClient } from "@/components/layout/protected-layout-client";
 
 export default function ProtectedLayout({
   children,

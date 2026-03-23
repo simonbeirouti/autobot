@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-import { ObjectiveIntake } from "@/components/objective-intake";
+import { ObjectiveIntake } from "@/components/dashboard/objective-intake";
 import { useProject } from "@/components/providers/project-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PROJECT_ONBOARDING_ROUTE } from "@/lib/routes";
