@@ -7,6 +7,7 @@ import type { Transition, Variants } from "motion/react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { buildAuthHref } from "@/components/auth/auth-route";
+import { openMarketingContact } from "@/components/marketing/marketing-contact-sheet";
 import { LogoutButton } from "@/components/auth/logout-button";
 import { Button } from "@/components/ui/button";
 import { DASHBOARD_HOME_ROUTE, PUBLIC_MARKETING_ROUTES } from "@/lib/routes";
@@ -81,6 +82,11 @@ export function MobileNavMenu({
 
   function handleNavigation(href: string) {
     closeMenu();
+
+    if (href === "/contact") {
+      openMarketingContact();
+      return;
+    }
 
     if (pathname !== href) {
       router.push(href);
@@ -191,8 +197,16 @@ export function MobileNavMenu({
               </div>
 
               <motion.div className="mt-auto pt-6" variants={itemVariants}>
+                <Button
+                  variant="outline"
+                  className="h-14 w-full text-base"
+                  onClick={() => handleNavigation("/contact")}
+                >
+                  Contact
+                </Button>
+
                 {isAuthenticated ? (
-                  <div className="flex w-full gap-2">
+                  <div className="mt-2 flex w-full gap-2">
                     <Button
                       className="h-14 text-base flex-1"
                       onClick={() => handleNavigation(DASHBOARD_HOME_ROUTE)}
@@ -206,7 +220,7 @@ export function MobileNavMenu({
                     />
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="mt-2 grid grid-cols-2 gap-2">
                     <Button
                       variant="outline"
                       className="h-14 w-full text-base"

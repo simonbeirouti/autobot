@@ -5,6 +5,7 @@ import { useReducedMotion } from "motion/react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 
+import { DotFieldCanvas } from "@/components/marketing/dot-field-canvas";
 import { EncryptedText } from "@/components/ui/encrypted-text";
 
 gsap.registerPlugin(useGSAP);
@@ -137,8 +138,13 @@ export function HomepageHero({ words }: HomepageHeroProps) {
   );
 
   return (
-    <section ref={sectionRef} className="relative bg-background text-foreground">
-      <div className="relative mx-auto flex min-h-[calc(100svh-4rem)] flex-col">
+    <section ref={sectionRef} className="relative overflow-hidden text-foreground">
+      <DotFieldCanvas
+        variant="centered-circles"
+        dotColor="rgba(17,17,17,0.34)"
+        className="z-0 opacity-100"
+      />
+      <div className="relative z-10 mx-auto flex min-h-[calc(100svh-4rem)] flex-col">
         <div className="relative flex flex-1 items-center justify-center">
           <div className="relative h-[28rem] w-full overflow-hidden md:h-[34rem] -mt-24">
             {phrases.map((phrase, index) => (
@@ -149,7 +155,7 @@ export function HomepageHero({ words }: HomepageHeroProps) {
                     phraseRefs.current[index] = element;
                   }
                 }}
-                className="absolute block whitespace-nowrap opacity-0 text-[2.3rem] font-extralight tracking-[-0.08em] text-foreground md:text-[5.25rem]"
+                className="absolute block whitespace-nowrap opacity-0 text-[2.3rem] font-extralight tracking-[-0.08em] text-foreground md:text-[5.25rem] uppercase"
               >
                 <EncryptedText
                   text={phrase}

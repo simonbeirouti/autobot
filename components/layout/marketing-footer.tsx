@@ -74,7 +74,7 @@ export function MarketingFooter() {
   );
 
   return (
-    <footer ref={footerRef} className="min-h-[calc(100svh-4rem)] bg-primary text-foreground">
+    <footer id="marketing-footer" ref={footerRef} className="min-h-[calc(100svh-4rem)] bg-primary text-foreground">
       <div className="mx-auto flex min-h-[calc(100svh-4rem)] w-full flex-col px-4 py-4 sm:px-6 sm:py-6 lg:px-12 lg:py-12">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">

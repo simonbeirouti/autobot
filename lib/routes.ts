@@ -12,10 +12,6 @@ export const PUBLIC_MARKETING_ROUTES = [
     href: "/about",
     label: "About",
   },
-  {
-    href: "/contact",
-    label: "Contact",
-  },
 ] as const;
 
 export function getProjectSwitcherDestination(pathname: string | null) {

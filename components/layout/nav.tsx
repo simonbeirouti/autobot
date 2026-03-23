@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AuthButton } from "../auth/auth-button";
+import { MarketingContactLink } from "@/components/marketing/marketing-contact-sheet";
 import { MobileNavMenu } from "./mobile-nav-menu";
 import { PUBLIC_MARKETING_ROUTES } from "@/lib/routes";
 import { getCurrentUser } from "@/lib/supabase/auth";
@@ -14,16 +15,19 @@ export default async function Nav() {
         <div className="flex items-center gap-5 font-semibold">
           <Link href="/">AutoBot</Link>
         </div>
-        <div className="hidden items-center gap-6 md:flex">
+        <div className="hidden items-center gap-2 md:flex">
           {PUBLIC_MARKETING_ROUTES.map((route) => (
             <Link
               key={route.href}
               href={route.href}
-              className="text-muted-foreground transition-colors hover:text-foreground"
+              className="text-muted-foreground transition-colors mr-2 hover:text-foreground"
             >
               {route.label}
             </Link>
           ))}
+          <MarketingContactLink variant="outline">
+            Contact
+          </MarketingContactLink>
           <AuthButton />
         </div>
         <MobileNavMenu isAuthenticated={Boolean(user)} />

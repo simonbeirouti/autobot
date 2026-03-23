@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 
+import { MarketingContactSheet } from "@/components/marketing/marketing-contact-sheet";
 import { MarketingFooter } from "@/components/layout/marketing-footer";
 import Nav from "@/components/layout/nav";
 
@@ -27,6 +28,9 @@ export default function MarketingLayout({
         {children}
         <MarketingFooter />
       </div>
+      <Suspense fallback={null}>
+        <MarketingContactSheet />
+      </Suspense>
     </div>
   );
 }
