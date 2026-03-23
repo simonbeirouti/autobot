@@ -14,9 +14,9 @@ export function PageShell({
   scrollableClassName?: string;
 }) {
   return (
-    <main className={cn("flex-1 min-h-0 w-full overflow-hidden", className)}>
-      <div className={cn("h-full", scrollable && "overflow-y-auto", scrollableClassName)}>
-        <div className={cn("mx-auto flex min-h-full w-full flex-col p-3", contentClassName)}>
+    <main className={cn("flex-1 w-full", scrollable ? "min-h-0 overflow-hidden" : "min-h-fit", className)}>
+      <div className={cn(scrollable ? "h-full overflow-y-auto" : "h-auto", scrollableClassName)}>
+        <div className={cn("mx-auto flex w-full flex-col p-3", scrollable && "min-h-full", contentClassName)}>
           {children}
         </div>
       </div>

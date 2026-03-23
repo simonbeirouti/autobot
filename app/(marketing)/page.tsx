@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { MarketingHomepage } from "@/components/marketing/homepage";
 import { PageShell } from "@/components/page-shell";
 import { createPageMetadata } from "@/lib/seo";
 
@@ -11,8 +12,8 @@ export const metadata: Metadata = createPageMetadata({
 
 export default function Home() {
   return (
-    <PageShell contentClassName="max-w-6xl gap-20">
-      Signup form
+    <PageShell scrollable={false} contentClassName="max-w-none p-0">
+      <MarketingHomepage />
     </PageShell>
   );
 }

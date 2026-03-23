@@ -17,6 +17,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { ThemeSwitcher } from "./theme-switcher";
 
 export function ProtectedLayoutClient({
   children,
@@ -68,6 +69,7 @@ export function ProtectedLayoutClient({
             >
               <SendIcon className="size-4" />
             </Button>
+            <ThemeSwitcher />
           </div>
         </header>
         <Suspense fallback={<div className="min-h-0 flex-1 bg-background" />}>

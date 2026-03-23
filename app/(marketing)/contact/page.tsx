@@ -11,7 +11,7 @@ export const metadata: Metadata = createPageMetadata({
 
 export default function ContactPage() {
   return (
-    <PageShell contentClassName="max-w-4xl justify-center gap-6 px-6 py-16">
+    <PageShell scrollable={false} contentClassName="max-w-4xl justify-center gap-6 px-6 py-16">
       <div className="space-y-3">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           Contact
