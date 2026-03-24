@@ -22,7 +22,7 @@ function MobileNavMenuLink({
   onNavigate: (href: string) => void;
 }) {
   return (
-    <Button asChild className="flex h-14 w-full items-center" size="lg" variant="outline">
+    <Button asChild className="flex text-base h-14 w-full items-center" size="lg" variant="outline">
       <Link
         href={href}
         onClick={(event) => {
@@ -83,22 +83,22 @@ export function MobileNavMenu({
   function handleNavigation(href: string) {
     closeMenu();
 
-    if (href === "/contact") {
-      openMarketingContact();
-      return;
-    }
-
     if (pathname !== href) {
       router.push(href);
     }
   }
 
+  function handleContactNavigation() {
+    closeMenu();
+    openMarketingContact();
+  }
+
   const panelTransition: Transition = shouldReduceMotion
     ? { duration: 0 }
-    : { duration: 0.28, ease: [0.16, 1, 0.3, 1] as const };
+    : { duration: 0.34, ease: [0.16, 1, 0.3, 1] as const };
   const panelExitTransition: Transition = shouldReduceMotion
     ? { duration: 0 }
-    : { duration: 1.35, ease: [0.2, 0.9, 0.24, 1] as const };
+    : { duration: 0.3, ease: [0.32, 0, 0.67, 0] as const };
   const itemTransition: Transition = shouldReduceMotion
     ? { duration: 0 }
     : { duration: 0.2, ease: [0.22, 1, 0.36, 1] as const };
@@ -109,8 +109,8 @@ export function MobileNavMenu({
   const panelVariants: Variants = {
     closed: {
       opacity: 0,
-      y: -12,
-      scaleY: 0.96,
+      y: -10,
+      scale: 0.985,
       transition: shouldReduceMotion
         ? panelExitTransition
         : {
@@ -121,7 +121,7 @@ export function MobileNavMenu({
     open: {
       opacity: 1,
       y: 0,
-      scaleY: 1,
+      scale: 1,
       transition: panelTransition,
     },
   };
@@ -149,7 +149,7 @@ export function MobileNavMenu({
   const itemVariants: Variants = {
     closed: {
       opacity: 0,
-      y: 14,
+      y: 10,
       transition: itemExitTransition,
     },
     open: {
@@ -175,13 +175,13 @@ export function MobileNavMenu({
         {isOpen ? (
           <motion.div
             animate="open"
-            className="fixed inset-x-0 bottom-0 top-16 z-40 flex flex-col bg-background text-foreground origin-top"
+            className="absolute left-0 right-0 top-[calc(100%+0.75rem)] z-40 origin-top"
             exit="closed"
             initial="closed"
             variants={panelVariants}
           >
             <motion.div
-              className="flex min-h-0 flex-1 flex-col px-5 pb-5"
+              className="flex max-h-[calc(100svh-7rem)] min-h-0 flex-col overflow-y-auto border border-border/70 bg-background/95 px-5 py-5 text-foreground shadow-[0_24px_55px_-32px_rgba(15,23,42,0.32)] backdrop-blur-md supports-[backdrop-filter]:bg-background/92"
               variants={listVariants}
             >
               <div className="flex flex-col gap-2">
@@ -196,11 +196,11 @@ export function MobileNavMenu({
                 ))}
               </div>
 
-              <motion.div className="mt-auto pt-6" variants={itemVariants}>
+              <motion.div className="mt-auto pt-2" variants={itemVariants}>
                 <Button
                   variant="outline"
                   className="h-14 w-full text-base"
-                  onClick={() => handleNavigation("/contact")}
+                  onClick={handleContactNavigation}
                 >
                   Contact
                 </Button>

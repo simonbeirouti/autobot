@@ -144,7 +144,7 @@ export function HomepageHero({ words }: HomepageHeroProps) {
         dotColor="rgba(17,17,17,0.34)"
         className="z-0 opacity-100"
       />
-      <div className="relative z-10 mx-auto flex min-h-[calc(100svh-4rem)] flex-col">
+      <div className="relative z-10 mx-auto flex min-h-[100svh] flex-col">
         <div className="relative flex flex-1 items-center justify-center">
           <div className="relative h-[28rem] w-full overflow-hidden md:h-[34rem] -mt-24">
             {phrases.map((phrase, index) => (

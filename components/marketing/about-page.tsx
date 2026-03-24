@@ -251,7 +251,7 @@ function AboutFeatureSection({
                 key={panel.number}
                 data-about-panel
                 className={cn(
-                  "h-[26rem] px-7 py-8 text-[#111111] sm:px-10 sm:py-10",
+                  "h-[30rem] px-7 py-8 text-[#111111] sm:px-10 sm:py-10",
                   panel.surface,
                 )}
               >

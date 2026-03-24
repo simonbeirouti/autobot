@@ -10,8 +10,8 @@ export default async function Nav() {
   const user = await getCurrentUser();
 
   return (
-    <nav className="flex h-16 w-full justify-center">
-      <div className="flex w-full items-center justify-between px-5 py-3 text-sm">
+    <nav className="w-full px-4 pt-4 sm:px-6">
+      <div className="relative mx-auto flex h-16 w-full items-center justify-between border border-border/70 bg-background/45 px-5 py-3 text-sm shadow-[0_20px_45px_-32px_rgba(15,23,42,0.35)] backdrop-blur-md supports-[backdrop-filter]:bg-background/25">
         <div className="flex items-center gap-5 font-semibold">
           <Link href="/">AutoBot</Link>
         </div>
@@ -20,7 +20,7 @@ export default async function Nav() {
             <Link
               key={route.href}
               href={route.href}
-              className="text-muted-foreground transition-colors mr-2 hover:text-foreground"
+              className="mr-2 font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               {route.label}
             </Link>
