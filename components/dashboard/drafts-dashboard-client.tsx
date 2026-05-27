@@ -213,6 +213,7 @@ function getDraftWorkspaceMode(
 
 async function fetchDrafts(projectId: string, signal?: AbortSignal) {
   return fetchJson<IntakeDraft[]>(`/api/intake/drafts?projectId=${projectId}`, {
+    cache: "no-store",
     signal,
   });
 }
@@ -1039,6 +1040,7 @@ export function DraftsDashboardClient({
         }
       : {}),
     enabled: Boolean(activeProjectId),
+    refetchOnMount: "always",
     staleTime: dashboardQueryTimings.drafts.staleTime,
   });
 
@@ -1049,14 +1051,7 @@ export function DraftsDashboardClient({
     hasDraftsLoadError,
     ERROR_VISIBILITY_DELAY_MS,
   );
-  const hasRequestedDraft = requestedDraftId
-    ? drafts.some((draft) => draft.id === requestedDraftId)
-    : false;
-  const selectedDraftId = requestedDraftId
-    ? hasRequestedDraft
-      ? requestedDraftId
-      : null
-    : initialSelectedDraftId ?? drafts[0]?.id ?? null;
+  const selectedDraftId = requestedDraftId ?? initialSelectedDraftId ?? drafts[0]?.id ?? null;
   const deferredDraftId = useDeferredValue(selectedDraftId);
 
   useEffect(() => {
@@ -1138,23 +1133,14 @@ export function DraftsDashboardClient({
     throw draftsQuery.error;
   }
 
-  const isMissingRequestedDraft =
-    Boolean(
-      requestedDraftId &&
-      activeProject &&
-      !draftsQuery.isLoading &&
-      !draftsQuery.isFetching &&
-      !draftsQuery.error &&
-      !hasRequestedDraft,
-    ) ||
-    Boolean(
-      selectedDraftId &&
-      flowQuery.error &&
-      !flowQuery.isLoading &&
-      !flowQuery.isFetching &&
-      !flowQuery.data &&
-      isNotFoundError(flowQuery.error),
-    );
+  const isMissingRequestedDraft = Boolean(
+    requestedDraftId &&
+    flowQuery.error &&
+    !flowQuery.isLoading &&
+    !flowQuery.isFetching &&
+    !flowQuery.data &&
+    isNotFoundError(flowQuery.error),
+  );
 
   if (
     flowQuery.error &&
@@ -1274,6 +1260,15 @@ export function DraftsDashboardClient({
   }, [flowQuery.data, toolPreflight]);
 
   useEffect(() => {
+    const draftProjectId = flowQuery.data?.draft.projectId ?? null;
+    if (!draftProjectId || draftProjectId === activeProjectId) {
+      return;
+    }
+
+    setActiveProjectId(draftProjectId);
+  }, [activeProjectId, flowQuery.data?.draft.projectId, setActiveProjectId]);
+
+  useEffect(() => {
     if (!flowQuery.data?.draft.runId || flowQuery.data.draft.status !== "executing") {
       return;
     }
@@ -1289,11 +1284,12 @@ export function DraftsDashboardClient({
       dashboardQueryKeys.drafts.preflight(flow.draft.id),
       flow.toolPreflight ?? null,
     );
-    if (!activeProjectId) {
+    const flowProjectId = flow.draft.projectId ?? activeProjectId;
+    if (!flowProjectId) {
       return;
     }
     queryClient.setQueryData<IntakeDraft[] | undefined>(
-      dashboardQueryKeys.drafts.all(activeProjectId),
+      dashboardQueryKeys.drafts.all(flowProjectId),
       (currentDrafts) => upsertDraftInList(currentDrafts, flow.draft),
     );
   }
@@ -1456,9 +1452,9 @@ export function DraftsDashboardClient({
           queryKey: dashboardQueryKeys.notifications.all,
         });
       }
-      if (activeProjectId) {
+      if (flow.draft.projectId) {
         await queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.runs.all(activeProjectId),
+          queryKey: dashboardQueryKeys.runs.all(flow.draft.projectId),
         });
       }
       toast.success("Execution started.");

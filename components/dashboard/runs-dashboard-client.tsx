@@ -326,6 +326,7 @@ export function RunsDashboardClient({
         }
       : {}),
     enabled: Boolean(activeProjectId),
+    refetchOnMount: "always",
     staleTime: dashboardQueryTimings.runs.staleTime,
   });
 
@@ -333,12 +334,7 @@ export function RunsDashboardClient({
   const hasRunsLoadError =
     Boolean(runsQuery.error) && !runsQuery.isLoading && !runsQuery.isFetching;
   const showRunsError = useDelayedVisibility(hasRunsLoadError, ERROR_VISIBILITY_DELAY_MS);
-  const hasRequestedRun = requestedRunId ? runs.some((run) => run.id === requestedRunId) : false;
-  const selectedRunId = requestedRunId
-    ? hasRequestedRun
-      ? requestedRunId
-      : null
-    : initialSelectedRunId ?? runs[0]?.id ?? null;
+  const selectedRunId = requestedRunId ?? initialSelectedRunId ?? runs[0]?.id ?? null;
   const deferredRunId = useDeferredValue(selectedRunId);
 
   useEffect(() => {
@@ -545,23 +541,14 @@ export function RunsDashboardClient({
     throw runsQuery.error;
   }
 
-  const isMissingRequestedRun =
-    Boolean(
-      requestedRunId &&
-      activeProject &&
-      !runsQuery.isLoading &&
-      !runsQuery.isFetching &&
-      !runsQuery.error &&
-      !hasRequestedRun,
-    ) ||
-    Boolean(
-      selectedRunId &&
-      workspaceQuery.error &&
-      !workspaceQuery.isLoading &&
-      !workspaceQuery.isFetching &&
-      !workspaceQuery.data &&
-      isNotFoundError(workspaceQuery.error),
-    );
+  const isMissingRequestedRun = Boolean(
+    requestedRunId &&
+    workspaceQuery.error &&
+    !workspaceQuery.isLoading &&
+    !workspaceQuery.isFetching &&
+    !workspaceQuery.data &&
+    isNotFoundError(workspaceQuery.error),
+  );
 
   if (
     workspaceQuery.error &&

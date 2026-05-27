@@ -1,3 +1,24 @@
+# ToDos
+
+- remove 
+    - fix the layout within the chat page 
+    - fix the scroll on the tool page 
+
+- integrate new tools for basic functionality 
+    - add into the UI 
+    - test thoroughly
+
+- research looping once the task is complete
+    - cron check ins -> automated tasks
+    - get response, act on it? 
+
+- fix rate limiting (too many calls, different agents for each agents)
+    - integrate model chooser via providers for agents
+
+- improve overall approach (reuseable components etc)
+- loading skeleton on projects page not working
+
+
 # Autobot
 
 Autobot is a simple Next.js app built with:
